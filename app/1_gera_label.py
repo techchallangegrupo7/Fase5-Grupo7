@@ -3,8 +3,11 @@ import cv2
 import re
 
 # --- Caminhos ---
-images_path = "dataset"
-labels_path = "dataset"
+images_path = "dataset/images"
+labels_path = "dataset/labels"
+
+# Cria os diretórios necessários
+os.makedirs(images_path, exist_ok=True)
 os.makedirs(labels_path, exist_ok=True)
 
 # --- 1️⃣ Encontrar e preparar a lista de arquivos ---
@@ -16,26 +19,17 @@ for dirpath, dirnames, filenames in os.walk(images_path):
             all_png_files.append(os.path.join(dirpath, filename))
 
 # --- 2️⃣ Criar class_map com a lógica de nome base ---
-# Pegar nomes base únicos de todos os arquivos, usando rsplit
+# Pegar nomes base únicos de todos os arquivos
 class_names = set()
 for full_path in all_png_files:
     filename = os.path.basename(full_path)
     
-    # --- Nova lógica para determinar o nome base ---
+    # --- Lógica otimizada para determinar o nome base ---
     filename_without_ext = os.path.splitext(filename)[0]
     
-    # Pega a parte após o último '_'
-    partes = filename_without_ext.rsplit('_', 1)
+    # Usa re.sub para remover os sufixos _dark ou _light
+    base_name = re.sub(r'(_dark|_light)$', '', filename_without_ext, flags=re.IGNORECASE)
     
-    # Verifica se a última parte contém algum dígito (número)
-    if len(partes) > 1 and re.search(r'\d', partes[-1]):
-        # Se contiver, a última parte é a versão, e o nome base é a parte anterior
-        base_name = partes[0]
-    else:
-        # Se não contiver (ex: 'aws_cd_special'), retira o último segmento
-        # para chegar ao nome base correto
-        base_name = filename_without_ext.rsplit('_', 2)[0]
-        
     class_names.add(base_name)
 
 # Ordena os nomes para garantir que os IDs sejam consistentes
@@ -53,14 +47,10 @@ for full_path in all_png_files:
     # Obtém o nome do arquivo e o diretório
     dir_name, filename = os.path.split(full_path)
     
-    # --- Aplica a mesma lógica de nome base para o arquivo atual ---
+    # --- Aplica a mesma lógica simplificada para o arquivo atual ---
     filename_without_ext = os.path.splitext(filename)[0]
-    partes = filename_without_ext.rsplit('_', 1)
     
-    if len(partes) > 1 and re.search(r'\d', partes[-1]):
-        base_name = partes[0]
-    else:
-        base_name = filename_without_ext.rsplit('_', 2)[0]
+    base_name = re.sub(r'(_dark|_light)$', '', filename_without_ext, flags=re.IGNORECASE)
     
     img = cv2.imread(full_path, cv2.IMREAD_UNCHANGED)
     if img is None:
@@ -77,8 +67,8 @@ for full_path in all_png_files:
     class_id = class_map[base_name]
     label_line = f"{class_id} {x_center} {y_center} {width_norm} {height_norm}"
     
-    # Salva o arquivo de label no mesmo diretório da imagem
-    txt_path = os.path.join(dir_name, os.path.splitext(filename)[0] + ".txt")
+    # Salva o arquivo de label no diretório "labels"
+    txt_path = os.path.join(labels_path, os.path.splitext(filename)[0] + ".txt")
     with open(txt_path, "w") as f:
         f.write(label_line)
     
@@ -91,8 +81,8 @@ for name, idx in class_map.items():
 
 names_str = f"names: {names_array}\n"
 
-# Salva o arquivo de classes na raiz do dataset
-classes_file = os.path.join(images_path, "classes.yaml")
+# Salva o arquivo de classes no diretório raiz do dataset
+classes_file = os.path.join("dataset", "classes.yaml")
 
 with open(classes_file, "w", encoding="utf-8") as f:
     f.write(names_str)
