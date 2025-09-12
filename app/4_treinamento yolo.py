@@ -5,18 +5,18 @@ from ultralytics import YOLO
 def main():
     data_yaml = 'dataset/yolo/data.yaml'
     model = YOLO('yolov8s.pt')
-    epochs = 50
+    epochs = 100
     model.train(
         data=data_yaml,
         epochs=epochs,
-        imgsz=416,
-        batch=16,
-        project='runs/train',
+        imgsz=640,
+        batch=8,
+        project='runs/train2',
         name='yolov8s-custom',
         save_period=5
     )
 
-    weights_dir = 'runs/train/yolov8s-custom/weights'
+    weights_dir = 'runs/train2/yolov8s-custom/weights'
     for epoch in range(1, epochs + 1):
         src = f'{weights_dir}/epoch{epoch}.pt'
         dst = f'{weights_dir}/treinamento_yolo_aws_epoca_{epoch}.pt'
