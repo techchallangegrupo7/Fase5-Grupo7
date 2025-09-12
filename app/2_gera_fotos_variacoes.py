@@ -10,7 +10,7 @@ input_img_dir = 'dataset/images'
 input_lbl_dir = 'dataset/labels'  # <-- Caminho correto para as labels
 output_img_dir = 'dataset/images_aug'
 output_lbl_dir = 'dataset/labels_aug'
-num_aug = 10  # Quantas variações por imagem
+num_aug = 12  # Quantas variações por imagem
 
 os.makedirs(output_img_dir, exist_ok=True)
 os.makedirs(output_lbl_dir, exist_ok=True)
