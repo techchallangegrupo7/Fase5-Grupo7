@@ -1,1 +1,0 @@
-Roboflow utilizar o mesmo para fazer a rotulagem
