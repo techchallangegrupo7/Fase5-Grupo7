@@ -3,8 +3,7 @@ Rodar o python na seguinte ordem:
  1_gera_label.py
  2_gera_variacoes.py
  3_Treinar o modelo FASE5.py  no colab
- 4_yolodetect.py
+ 4_stride.py (roda o yolo e já faz o relatório)
  
  Último modelo gerado foi o best.pt está na pasta dataset
-
- modelo utilizado no driver matheus yolov8s-custom-sem-rotacao-semparametros
+ No driver = > https://drive.google.com/file/d/1FpyJR2KZxG3pX5D0Ut0AcclXEkd29qpm/view?usp=drive_link
