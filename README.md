@@ -155,5 +155,5 @@ Faça upload do **diagrama** (e opcionalmente de um **logo**), ajuste `Título/S
 
 ## Licença
 
-Uso acadêmico/educacional (Hackathon/estudos). Avalie e ajuste a licença conforme sua política institucional.
+Uso acadêmico/educacional (Hackathon/estudos).
 
