@@ -27,7 +27,7 @@ try:
     from reportlab.lib.utils import ImageReader
     from reportlab.lib.colors import HexColor
     from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, Image as RLImage,
+        SimpleDocTemplate, Paragraph, PageBreak, Spacer, Image as RLImage,
         ListFlowable, ListItem
     )
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -245,13 +245,13 @@ def annotate_image(original_path: str, detections: List, color_hex: str = "#0EA5
     extra_h = len(legend_lines) * line_h + 18 if legend_lines else 0
     if extra_h > 0:
         w, h = img.size
-        new_img = Image.new("RGB", (w, h + extra_h), (255, 255, 255))
+        new_img = Image.new("RGB", (w, h), (255, 255, 255))
         new_img.paste(img, (0, 0))
         draw2 = ImageDraw.Draw(new_img)
         y = h + 10
-        for line in legend_lines:
-            draw2.text((16, y), line, fill=(0, 0, 0), font=font)
-            y += line_h
+        #for line in legend_lines:
+        #    draw2.text((16, y), line, fill=(0, 0, 0), font=font)
+        #    y += line_h
         img = new_img
 
     base = os.path.basename(original_path)
@@ -445,6 +445,7 @@ def build_pdf_a4(
     logo_path: str | None,
     source_image_path: str,
     labeled_image_path: str,
+    legend: str,
     per_component: List[Tuple[str, str, str]],
 ):
     """Gera PDF A4 com paginação automática e listas/bold."""
@@ -490,23 +491,27 @@ def build_pdf_a4(
     doc = SimpleDocTemplate(pdf_path, pagesize=A4, leftMargin=24, rightMargin=24, topMargin=100, bottomMargin=36)
     story = []
 
-    def _image_block(path, caption, max_h):
+    def _image_block(path, caption, max_h, legend=None):
         if not path or not os.path.exists(path):
             return
         try:
             img = RLImage(path)
             img._restrictSize(doc.width, max_h)
             img.hAlign = "LEFT"
-            story.append(img)
-            story.append(Spacer(1, 4))
-            story.append(Paragraph(f"<b>{caption}</b>", ParagraphStyle("cap", parent=body, fontSize=9)))
+            story.append(Paragraph(f"<b>{caption}</b>", ParagraphStyle("cap", parent=body, fontSize=11)))
             story.append(Spacer(1, 10))
+            story.append(img)
+            if(legend):
+                for text in legend:
+                    story.append(Paragraph(f"{text}"))
         except Exception:
             pass
 
     max_img_h = 685
     _image_block(source_image_path, "Figura 1 — Diagrama original", max_img_h)
-    _image_block(labeled_image_path, "Figura 2 — Diagrama anotado (detecções)", max_img_h)
+    story.append(PageBreak())
+    _image_block(labeled_image_path, "Figura 2 — Diagrama anotado (detecções)", max_img_h, legend)
+    story.append(PageBreak())
 
     iter_components = per_component if MAX_COMPONENTS <= 0 else per_component[:MAX_COMPONENTS]
     for comp_name, analysis, mitig in iter_components:
@@ -909,6 +914,7 @@ def analyze():
             logo_path=logo_path,
             source_image_path=src_path,
             labeled_image_path=labeled_path,
+            legend=legend_lines,
             per_component=[(c["name"], c["analysis"], c["mitigations"]) for c in components],
         )
 
