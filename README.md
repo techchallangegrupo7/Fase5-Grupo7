@@ -44,11 +44,10 @@ project/
 ├─ 4_stride_gemini.py
 ├─ criar_diagramas.py
 ├─ .env
-├─ weights/
-│  └─ best.pt                 # seus pesos YOLO (ou configure YOLO_WEIGHTS no .env)
 ├─ dataset/
 │  ├─ images/                  # PNG/JPG dos ícones/diagramas
 │  ├─ labels/                  # TXT no formato YOLO
+│  ├─ best.pt                  # seus pesos YOLO (ou configure YOLO_WEIGHTS no .env)
 │  └─ classes.yaml             # gerado pelo 1_gera_label.py
 ├─ uploads/                    # gerenciado pela app web
 ├─ previews/                   # imagens anotadas (legenda)
@@ -63,7 +62,7 @@ Crie/edite o arquivo `.env` na raiz com, por exemplo:
 
 ```ini
 GEMINI_API_KEY=SEU_TOKEN_AQUI
-YOLO_WEIGHTS=./weights/best.pt
+YOLO_WEIGHTS=./dataset/best.pt
 APP_SECRET_KEY=um_segredo_qualquer
 FAST_IMG_MAX_SIDE=1280
 YOLO_CONF=0.25
