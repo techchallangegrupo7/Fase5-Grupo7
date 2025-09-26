@@ -504,7 +504,7 @@ def build_pdf_a4(
         except Exception:
             pass
 
-    max_img_h = 260
+    max_img_h = 685
     _image_block(source_image_path, "Figura 1 — Diagrama original", max_img_h)
     _image_block(labeled_image_path, "Figura 2 — Diagrama anotado (detecções)", max_img_h)
 
@@ -847,7 +847,7 @@ def analyze():
             verbose=False,
             device=0 if _HAS_CUDA else "cpu",
             half=_HAS_CUDA,
-            imgsz=FAST_IMG_MAX_SIDE,
+            #imgsz=FAST_IMG_MAX_SIDE,
             max_det=YOLO_MAX_DET,
             agnostic_nms=True,
         )
