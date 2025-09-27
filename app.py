@@ -239,22 +239,25 @@ def annotate_image(original_path: str, detections: List, color_hex: str = "#0EA5
         x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
         draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
         draw.text((x1, max(0, y1 - 24)), str(i), fill=color, font=font)
-        legend_lines.append(f"{i}: {class_name} ({conf:.2f})")
+        name = service_map.get(class_name, class_name)
+        legend_lines.append(f"{i}: {name} ({conf:.2f})")
 
     line_h = 26
     extra_h = len(legend_lines) * line_h + 18 if legend_lines else 0
     if extra_h > 0:
         w, h = img.size
-        new_img = Image.new("RGB", (w, h), (255, 255, 255))
+        new_img = Image.new("RGB", (w, h + extra_h), (255, 255, 255))
         new_img.paste(img, (0, 0))
         draw2 = ImageDraw.Draw(new_img)
         y = h + 10
-        #for line in legend_lines:
-        #    draw2.text((16, y), line, fill=(0, 0, 0), font=font)
-        #    y += line_h
-        img = new_img
+        for line in legend_lines:
+            draw2.text((16, y), line, fill=(0, 0, 0), font=font)
+            y += line_h
+        #img = new_img
 
     base = os.path.basename(original_path)
+    out_legend_path = os.path.join(PREVIEW_FOLDER, f"labeled_legend_{base}")
+    new_img.save(out_legend_path, optimize=True)
     out_path = os.path.join(PREVIEW_FOLDER, f"labeled_{base}")
     img.save(out_path, optimize=True)
     return out_path, legend_lines
