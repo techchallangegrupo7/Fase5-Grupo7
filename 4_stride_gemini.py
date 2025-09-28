@@ -49,7 +49,7 @@ service_map = {
 try:
 # Configure sua chave de API aqui
     genai.configure(api_key="COLOQUE SUA CHAVE")
-    model_gemini = genai.GenerativeModel('gemini-1.5-flash')
+    model_gemini = genai.GenerativeModel('gemini-flash-latest')
 except Exception as e:
     print(f"❌ Erro ao configurar a API do Gemini: {e}")
     exit()
