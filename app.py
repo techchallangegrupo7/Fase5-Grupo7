@@ -1,3 +1,14 @@
+# -*- coding: utf-8 -*-
+# ============================================================
+# Analisador STRIDE para Diagramas - app.py (comentado)
+# ------------------------------------------------------------
+# • Flask para interface web
+# • YOLO (Ultralytics) para detecção de componentes no diagrama
+# • Gemini / OpenAI (opcional) para gerar análise STRIDE e mitigações
+# • ReportLab para gerar PDF A4 estruturado
+# • PIL para anotações visuais (bounding boxes e legenda)
+# ============================================================
+
 from __future__ import annotations
 import os
 import time
@@ -5,6 +16,9 @@ import traceback
 from datetime import datetime
 from typing import List, Dict, Tuple
 
+# -----------------------------
+# Flask (servidor web e rotas)
+# -----------------------------
 from flask import (
     Flask,
     request,
@@ -17,12 +31,16 @@ from flask import (
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
+# Carrega variáveis do arquivo .env (chaves, flags e parâmetros)
 load_dotenv()
 
-# ---------- Imports externos ----------
+# -----------------------------
+# Imagens e PDF
+# -----------------------------
 from PIL import Image, ImageDraw, ImageFont
 
 try:
+    # ReportLab → geração de PDF (A4, estilos, componentes de layout)
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.utils import ImageReader
     from reportlab.lib.colors import HexColor
@@ -33,53 +51,72 @@ try:
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_LEFT
 except Exception as e:
+    # Se ReportLab não estiver instalado, encerramos com mensagem clara
     raise SystemExit(f"Erro ao importar ReportLab: {e}")
 
-# Torch (opcional) só para detectar GPU e usar half-precision
+# -----------------------------
+# Torch (opcional) → checa GPU
+# -----------------------------
 try:
     import torch
     _HAS_CUDA = torch.cuda.is_available()
     if _HAS_CUDA:
+        # Ativa autotuning do cuDNN para melhorar performance em imagens repetitivas
         torch.backends.cudnn.benchmark = True
 except Exception:
     _HAS_CUDA = False
 
-# ---------- Configurações ----------
+# ============================================================
+# Configurações globais (muitas vindas do .env)
+# ============================================================
+
+# Limite de upload (MB) para arquivos enviados via formulário
 MAX_CONTENT_LENGTH_MB = int(os.getenv("MAX_CONTENT_LENGTH_MB", "15"))
+
+# Extensões aceitas para upload (diagramas e logo)
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg"}
 
-STATIC_FOLDER = os.path.abspath("static")
-UPLOAD_FOLDER = os.path.abspath("uploads")
+# Pastas básicas do projeto
+STATIC_FOLDER  = os.path.abspath("static")
+UPLOAD_FOLDER  = os.path.abspath("uploads")
 PREVIEW_FOLDER = os.path.abspath("previews")
-OUTPUT_FOLDER = os.path.abspath("outputs")
-FONTS_FOLDER = os.path.abspath("fonts")
+OUTPUT_FOLDER  = os.path.abspath("outputs")
+FONTS_FOLDER   = os.path.abspath("fonts")
 
-# Performance tunável por .env
-FAST_IMG_MAX_SIDE = int(os.getenv("FAST_IMG_MAX_SIDE", "1280"))  # downscale do maior lado
-YOLO_CONF = float(os.getenv("YOLO_CONF", "0.30"))                 # limiar de confiança
-YOLO_MAX_DET = int(os.getenv("YOLO_MAX_DET", "50"))               # máx. detecções
-MAX_COMPONENTS = int(os.getenv("MAX_COMPONENTS", "25"))           # máx. componentes no PDF/UI
-QUICK_DEFAULT = os.getenv("QUICK_DEFAULT", "0") == "1"            # modo rápido default (sem LLM)
+# Parâmetros de desempenho e YOLO
+FAST_IMG_MAX_SIDE = int(os.getenv("FAST_IMG_MAX_SIDE", "1280"))  # escala máx. do maior lado (acelera inferência)
+YOLO_CONF         = float(os.getenv("YOLO_CONF", "0.30"))        # confiança mínima de detecção
+YOLO_MAX_DET      = int(os.getenv("YOLO_MAX_DET", "50"))         # limite de detecções por imagem
+MAX_COMPONENTS    = int(os.getenv("MAX_COMPONENTS", "25"))       # quantos componentes listar no PDF/UI
+QUICK_DEFAULT     = os.getenv("QUICK_DEFAULT", "0") == "1"       # modo rápido padrão (usa placeholders, sem LLM)
 
+# Flag geral para desabilitar uso de LLMs (útil em ambiente offline)
 DISABLE_LLM = os.getenv("DISABLE_LLM", "0") == "1"
-# Gemini / LLM
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
-# OpenAI / LLM
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-nano")
 
-# YOLO
+# Gemini (Google) – chave e modelo
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+
+# OpenAI – chave e modelo (via LangChain ChatOpenAI)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "gpt-5-nano")
+
+# Caminho para os pesos do YOLO (.pt)
 YOLO_WEIGHTS = os.getenv("YOLO_WEIGHTS", os.path.join("weights", "best.pt"))
 
-NMS_IOU = float(os.getenv("NMS_IOU", "0.5"))   # 0.5 padrão; use 0.9–0.99 para manter mais caixas
+# IOU do NMS (quanto maior, mais caixas sobrepostas serão mantidas)
+NMS_IOU = float(os.getenv("NMS_IOU", "0.5"))
 
-# ---------- Pastas ----------
+# ============================================================
+# Preparação de pastas e limpeza de prévias antigas
+# ============================================================
+
+# Garante que as pastas críticas existem
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PREVIEW_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# Limpa prévias muito antigas (2 dias)
+# Limpa imagens de preview com mais de 2 dias (higiene de disco)
 _now = time.time()
 for f in list(os.listdir(PREVIEW_FOLDER)):
     p = os.path.join(PREVIEW_FOLDER, f)
@@ -87,40 +124,51 @@ for f in list(os.listdir(PREVIEW_FOLDER)):
         if os.path.isfile(p) and _now - os.path.getmtime(p) > 2 * 24 * 3600:
             os.remove(p)
     except Exception:
+        # Não interrompe o servidor se falhar na remoção
         pass
 
-# ---------- Flask ----------
+# ============================================================
+# Flask – inicialização
+# ============================================================
+
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH_MB * 1024 * 1024
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-app.secret_key = os.getenv("APP_SECRET_KEY", "dev_secret_change_me")
+app.secret_key = os.getenv("APP_SECRET_KEY", "dev_secret_change_me")  # troque em produção
 
-# Modelo YOLO inicializado sob demanda
+# Modelo YOLO é carregado sob demanda (primeira requisição)
 _YOLO_MODEL = None
 
-# ---------- Gemini ----------
+# ============================================================
+# LLM: Gemini
+# ============================================================
+
 _gemini = None
 if not DISABLE_LLM:
     try:
         import google.generativeai as genai
         if not GEMINI_API_KEY:
-            print("[AVISO] GEMINI_API_KEY não definido. Defina ou use DISABLE_LLM=1 para pular LLM.")
+            print("[AVISO] GEMINI_API_KEY não definido. Use DISABLE_LLM=1 para pular LLM.")
             DISABLE_LLM = True
         else:
             genai.configure(api_key=GEMINI_API_KEY)
             _gemini = genai.GenerativeModel(GEMINI_MODEL)
     except Exception as e:
+        # Se falhar, seguimos com placeholders
         print(f"[AVISO] Falha ao iniciar Gemini: {e}. Usando placeholders.")
         DISABLE_LLM = True
         _gemini = None
 
-# ---------- OpenAI ----------
+# ============================================================
+# LLM: OpenAI (via LangChain)
+# ============================================================
+
 _openai = None
 if not DISABLE_LLM:
     try:
         from langchain_openai import ChatOpenAI
         if not OPENAI_API_KEY:
-            print("[AVISO] OPENAI_API_KEY não definido. Defina ou use DISABLE_LLM=1 para pular LLM.")
+            print("[AVISO] OPENAI_API_KEY não definido. Use DISABLE_LLM=1 para pular LLM.")
             DISABLE_LLM = True
         else:
             _openai = ChatOpenAI(model=OPENAI_MODEL, api_key=OPENAI_API_KEY)
@@ -129,19 +177,28 @@ if not DISABLE_LLM:
         DISABLE_LLM = True
         _openai = None
 
-# ---------- YOLO ----------
+# ============================================================
+# YOLO – carregamento único + warm-up
+# ============================================================
+
 def get_yolo():
-    """Carrega o modelo YOLO uma única vez e faz warm-up leve."""
+    """
+    Carrega o modelo YOLO uma única vez e realiza um warm-up leve para
+    evitar o custo alto de primeira inferência. Erros de warm-up são ignorados.
+    """
     global _YOLO_MODEL
     if _YOLO_MODEL is None:
         try:
             from ultralytics import YOLO
         except Exception as e:
             raise SystemExit(f"Ultralytics não instalado: {e}")
+
         if not os.path.exists(YOLO_WEIGHTS):
             raise FileNotFoundError(f"Pesos YOLO não encontrados: {YOLO_WEIGHTS}")
+
         _YOLO_MODEL = YOLO(YOLO_WEIGHTS)
-        # warm-up opcional
+
+        # Warm-up opcional com imagem dummy (imgsz pequeno, sem salvar)
         try:
             _YOLO_MODEL.predict(
                 imgsz=min(FAST_IMG_MAX_SIDE, 640),
@@ -155,7 +212,10 @@ def get_yolo():
             pass
     return _YOLO_MODEL
 
-# ---------- Mapeamento de classes ----------
+# ============================================================
+# Mapeamento de labels → nomes legíveis (apresentação)
+# ============================================================
+
 service_map: Dict[str, str] = {
     "AWS-Backup": "AWS Backup",
     "AWS-Category_Compute": "Serviço de Computação AWS (EC2/Fargate)",
@@ -189,11 +249,16 @@ service_map: Dict[str, str] = {
     "Azure_users": "Usuários do Azure",
 }
 
-# ---------- Helpers ----------
+# ============================================================
+# Helpers de arquivo e imagem
+# ============================================================
+
 def allowed_file(filename: str) -> bool:
+    """Confere se a extensão do arquivo é suportada."""
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def load_font(size=18):
+    """Tenta carregar uma fonte TrueType; caso falhe, usa fonte padrão do PIL."""
     try:
         return ImageFont.truetype(os.path.join(FONTS_FOLDER, "arial.ttf"), size)
     except Exception:
@@ -203,7 +268,10 @@ def load_font(size=18):
             return ImageFont.load_default()
 
 def _resize_if_large(path: str, max_side: int) -> str:
-    """Reduz imagem muito grande mantendo proporção, para acelerar inferência."""
+    """
+    Reduz a imagem no próprio arquivo quando o maior lado excede max_side.
+    Isso reduz o custo de inferência no YOLO sem alterar proporção.
+    """
     try:
         im = Image.open(path).convert("RGB")
         w, h = im.size
@@ -216,7 +284,12 @@ def _resize_if_large(path: str, max_side: int) -> str:
         pass
     return path
 
+# ============================================================
+# NMS por IoU (simples) para limpar caixas muito sobrepostas
+# ============================================================
+
 def iou(box1, box2):
+    """Calcula Intersection-over-Union entre duas caixas [x1,y1,x2,y2]."""
     x_min_inter = max(box1[0], box2[0])
     y_min_inter = max(box1[1], box2[1])
     x_max_inter = min(box1[2], box2[2])
@@ -230,7 +303,12 @@ def iou(box1, box2):
     return 0 if union_area == 0 else inter_area / union_area
 
 def nms_iou_filter(boxes, class_names_map, iou_threshold=0.5):
-    """NMS simples por IoU, priorizando maior confiança."""
+    """
+    Aplica NMS (Non-Maximum Suppression) baseado em IoU:
+    - Ordena por confiança descrescente.
+    - Mantém a caixa se ela não tiver IoU alto com caixas já mantidas.
+    - Anexa o nome de classe (legível) ao final.
+    """
     if not hasattr(boxes, "tolist"):
         return []
     sorted_boxes = sorted(boxes.tolist(), key=lambda b: float(b[4]), reverse=True)
@@ -244,8 +322,15 @@ def nms_iou_filter(boxes, class_names_map, iou_threshold=0.5):
         kept.append(b + [class_name])
     return kept
 
+# ============================================================
+# Anotação visual (desenha caixas e legenda) com PIL
+# ============================================================
+
 def annotate_image(original_path: str, detections: List, color_hex: str = "#0EA5E9"):
-    """Desenha caixas e numerações e adiciona legenda abaixo."""
+    """
+    Desenha bounding boxes numeradas sobre a imagem e cria uma versão com legenda.
+    Retorna: (caminho_img_sem_legenda, lista_de_linhas_de_legenda)
+    """
     img = Image.open(original_path).convert("RGB")
     draw = ImageDraw.Draw(img)
     font = load_font(20)
@@ -261,6 +346,7 @@ def annotate_image(original_path: str, detections: List, color_hex: str = "#0EA5
         name = service_map.get(class_name, class_name)
         legend_lines.append(f"{i}: {name} ({conf:.2f})")
 
+    # acrescenta uma tarja branca abaixo para exibir a legenda
     line_h = 26
     extra_h = len(legend_lines) * line_h + 18 if legend_lines else 0
     if extra_h > 0:
@@ -272,19 +358,30 @@ def annotate_image(original_path: str, detections: List, color_hex: str = "#0EA5
         for line in legend_lines:
             draw2.text((16, y), line, fill=(0, 0, 0), font=font)
             y += line_h
-        #img = new_img
+        # substitui a imagem que será salva com legenda
+        img_with_legend = new_img
+    else:
+        img_with_legend = img.copy()
 
     base = os.path.basename(original_path)
     out_legend_path = os.path.join(PREVIEW_FOLDER, f"labeled_legend_{base}")
-    new_img.save(out_legend_path, optimize=True)
+    img_with_legend.save(out_legend_path, optimize=True)
+
     out_path = os.path.join(PREVIEW_FOLDER, f"labeled_{base}")
     img.save(out_path, optimize=True)
     return out_path, legend_lines
 
-# Cache simples para evitar chamar o LLM repetidas vezes para o mesmo componente
+# ============================================================
+# Cache para evitar chamadas repetidas ao LLM por componente
+# chave: "{LLM}_{component_name}" → valor: (analysis, mitigations)
+# ============================================================
+
 LLM_CACHE: Dict[str, Tuple[str, str]] = {}
 
-# --- Parser de texto -> seções STRIDE (bullets por categoria) ---
+# ============================================================
+# Parsing de texto → seções STRIDE (organiza bullets por categoria)
+# ============================================================
+
 import re, unicodedata
 
 _STRIDE_CANON = [
@@ -296,7 +393,7 @@ _STRIDE_CANON = [
     "Elevation of Privilege",
 ]
 
-# aliases PT/EN
+# aliases PT/EN (para robustez com respostas do LLM)
 _STRIDE_ALIASES = {
     "Spoofing": [
         r"spoofing", r"personifica(?:ç|c)[aã]o", r"impersona(?:ç|c)[aã]o",
@@ -331,7 +428,7 @@ _STRIDE_ALIASES = {
 _ALIAS_RE = "|".join(rf"(?:{alias})"
                      for aliases in _STRIDE_ALIASES.values() for alias in aliases)
 
-# Cabeçalho puro (aceita bullet antes e parênteses após)
+# Cabeçalho puro (apenas o nome da categoria) – tolera bullets e parênteses
 _HEADER_PURE_RE = re.compile(
     rf"""^\s{{0,3}}(?:[-*#]+\s*)?
          (?P<hdr>{_ALIAS_RE})
@@ -341,7 +438,7 @@ _HEADER_PURE_RE = re.compile(
     re.IGNORECASE | re.VERBOSE
 )
 
-# Cabeçalho inline: "Categoria: texto..." ou "Categoria - texto..."
+# Cabeçalho inline do tipo "Categoria: texto..."
 _HEADER_INLINE_RE = re.compile(
     rf"""^\s*(?P<hdr>{_ALIAS_RE})
          (?:\s*\([^)]*\))?\s*
@@ -352,12 +449,14 @@ _HEADER_INLINE_RE = re.compile(
 )
 
 def _normalize_text(s: str) -> str:
+    """Normaliza unicode e remove marcadores/ênfases comuns."""
     s = unicodedata.normalize("NFKC", s or "")
     s = s.replace("•", "*").replace("–", "-").replace("—", "-")
     s = s.replace("**", "").replace("__", "")
     return s.strip()
 
 def _canonicalize(header: str) -> str:
+    """Converte alias para a forma canônica da categoria."""
     h = _normalize_text(header).lower()
     for canon, aliases in _STRIDE_ALIASES.items():
         for a in aliases:
@@ -368,7 +467,7 @@ def _canonicalize(header: str) -> str:
             return canon
     return header.strip().title()
 
-# Heurística para bullets órfãos (quando não há categoria ativa)
+# Palavras-chave para buckets automáticos quando o LLM não separa por categoria
 _AUTO_BUCKET = {
     "Spoofing": [r"\bmfa\b", r"identidade", r"impersona", r"phish"],
     "Tampering": [r"inje(c|ç)[aã]o", r"\balter", r"manipula", r"modifica", r"\biac\b", r"policy"],
@@ -379,6 +478,7 @@ _AUTO_BUCKET = {
 }
 
 def _guess_category(text: str) -> str | None:
+    """Heurística simples para classificar um bullet não categorizado."""
     t = _normalize_text(text).lower()
     best, score = None, 0
     for cat, pats in _AUTO_BUCKET.items():
@@ -388,6 +488,11 @@ def _guess_category(text: str) -> str | None:
     return best
 
 def parse_stride_sections(text: str) -> dict[str, list[str]]:
+    """
+    Converte um texto genérico do LLM em um dicionário:
+      { "Spoofing": [...], "Tampering": [...], ... }
+    Aceita cabeçalhos puros, inline e bullets soltos.
+    """
     sections = {k: [] for k in _STRIDE_CANON}
     if not text:
         return sections
@@ -433,7 +538,7 @@ def parse_stride_sections(text: str) -> dict[str, list[str]]:
                 current = _canonicalize(mp.group("hdr"))
                 continue
 
-            # 3c) bullet normal
+            # 3c) bullet normal (coloca no bucket atual ou tenta adivinhar)
             if current:
                 sections[current].append(item)
             else:
@@ -441,7 +546,7 @@ def parse_stride_sections(text: str) -> dict[str, list[str]]:
                 sections[cat].append(item)
             continue
 
-        # 4) Linha solta (sem bullet)
+        # 4) Linha solta (sem bullet) → cai no bucket atual ou heurística
         if current:
             sections[current].append(line)
         else:
@@ -451,6 +556,7 @@ def parse_stride_sections(text: str) -> dict[str, list[str]]:
     return sections
 
 def _sanitize_para(s: str) -> str:
+    """Escapa HTML básico e mantém <b> pseudo-markdown."""
     if not s:
         return ""
     s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
@@ -459,12 +565,11 @@ def _sanitize_para(s: str) -> str:
     return s
 
 def sections_to_html(secs: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Aplica _sanitize_para em todos os itens para exibição segura na UI."""
     return {k: [_sanitize_para(v) for v in (secs.get(k) or [])] for k in _STRIDE_CANON}
 
-import re
-
+# Substituições comuns EN→PT para melhorar consistência do texto do LLM
 _PT_REPLACEMENTS = [
-    # conceitos gerais
     (r"\bLeast Privilege\b", "menor privilégio"),
     (r"\bPrinciple of Least Privilege\b", "princípio do menor privilégio"),
     (r"\bRole-?Based Access Control\b", "controle de acesso baseado em função (RBAC)"),
@@ -488,7 +593,6 @@ _PT_REPLACEMENTS = [
     (r"\bSIEM\b", "SIEM"),
     (r"\bDDoS\b", "DDoS"),
     (r"\bJWTs?\b", "JWT"),
-    # verbos e frases frequentes
     (r"\bensure\b", "garantir"),
     (r"\benforce\b", "impor"),
     (r"\brequire\b", "exigir"),
@@ -500,13 +604,11 @@ _PT_REPLACEMENTS = [
     (r"\bbackends?\b", "backend"),
 ]
 
-import re
-
 _SINGLE_LETTER_HDR = re.compile(
-    r"""^\s*           # espaços
-        (?:[-*•#]\s*)? # bullet opcional
-        ([sstrideSSTRIDE]) # uma letra do acrônimo
-        \s*(?:[-–—:])?\s*$ # opcional hífen/:
+    r"""^\s*
+        (?:[-*•#]\s*)?
+        ([sstrideSSTRIDE])
+        \s*(?:[-–—:])?\s*$
     """, re.VERBOSE
 )
 
@@ -517,49 +619,56 @@ _CAT_LINE = re.compile(
 )
 
 def strip_stride_artifacts(text: str) -> str:
-    """Remove linhas 'S/T/R/I/D/E' e cabeçalhos soltos que viram lixo nos bullets."""
+    """Remove linhas 'S/T/R/I/D/E' e cabeçalhos soltos que às vezes o LLM injeta."""
     if not text:
         return text
     out_lines = []
     for raw in text.splitlines():
         line = raw.rstrip()
         if _SINGLE_LETTER_HDR.match(line):
-            continue  # descarta "S", "T", ...
+            continue
         if _CAT_LINE.match(line):
-            continue  # descarta "S - Spoofing" etc. perdidos dentro do corpo
+            continue
         out_lines.append(raw)
     return "\n".join(out_lines)
 
-
 def ensure_ptbr(text: str) -> str:
-    """Conserta termos ingleses comuns mantendo siglas úteis.
-    Não altera cabeçalhos STRIDE (que já estão fixos na UI)."""
+    """Tradução leve de termos frequentes para PT-BR sem mexer nas siglas úteis."""
     if not text:
         return text
     out = text
     for pat, repl in _PT_REPLACEMENTS:
         out = re.sub(pat, repl, out, flags=re.IGNORECASE)
-    # normaliza algumas traduções de categoria que o LLM às vezes injeta dentro do corpo
+    # Normaliza nomes de categorias se vierem em EN dentro do corpo
     out = re.sub(r"\bInformation Disclosure\b", "Divulgação de Informação", out, flags=re.IGNORECASE)
     out = re.sub(r"\bElevation of Privilege\b", "Elevação de Privilégio", out, flags=re.IGNORECASE)
     out = re.sub(r"\bDenial of Service\b", "Negação de Serviço", out, flags=re.IGNORECASE)
     out = re.sub(r"\bRepudiation\b", "Repúdio", out, flags=re.IGNORECASE)
     out = re.sub(r"\bTampering\b", "Violação de Integridade (Tampering)", out, flags=re.IGNORECASE)
     out = re.sub(r"\bSpoofing\b", "Representação (Spoofing)", out, flags=re.IGNORECASE)
-    # evita “S - Spoofing / T - Tampering ...” que o modelo às vezes inclui dentro dos itens
-    out = re.sub(r"^\s*[STIRDE]\s*-\s*(Spoofing|Tampering|Repudiation|Information Disclosure|Denial of Service|Elevation of Privilege)\s*$",
-                 "", out, flags=re.IGNORECASE|re.MULTILINE)
+    # Remove linhas como "S - Spoofing" quando aparecem no corpo
+    out = re.sub(
+        r"^\s*[STIRDE]\s*-\s*(Spoofing|Tampering|Repudiation|Information Disclosure|Denial of Service|Elevation of Privilege)\s*$",
+        "", out, flags=re.IGNORECASE | re.MULTILINE
+    )
     return out
 
+# ============================================================
+# Chamadas de LLM (Gemini / OpenAI) com cache
+# ============================================================
 
-# ---------- Gemini ----------
 def call_gemini_stride(llm: str, component_name: str) -> Tuple[str, str]:
-    """Retorna (análise, mitigações) via Gemini. Sempre em PT-BR."""
+    """
+    Retorna (análise, mitigações) via Gemini para um componente específico.
+    - Se LLM estiver desabilitado, retorna placeholders.
+    - Força PT-BR e estrutura em bullets, sem cabeçalhos extras.
+    """
     key = f"{llm}_{component_name}"
     if key in LLM_CACHE:
         return LLM_CACHE[key]
 
     if DISABLE_LLM or _gemini is None:
+        # Placeholders curtos para uso quando LLM está desligado
         analysis = (
             "Spoofing: riscos de representação de identidades.\n"
             "Tampering: alterações não autorizadas em configurações e dados.\n"
@@ -578,6 +687,7 @@ def call_gemini_stride(llm: str, component_name: str) -> Tuple[str, str]:
         )
         return analysis, mitig
 
+    # Regras para moldar o estilo da resposta
     base_rules = (
         "Responda EXCLUSIVAMENTE em português do Brasil (pt-BR). "
         "Não use palavras em inglês; quando precisar citar uma sigla (ex.: RBAC, DDoS, TLS), mantenha a sigla e explique em português. "
@@ -585,6 +695,7 @@ def call_gemini_stride(llm: str, component_name: str) -> Tuple[str, str]:
         "Não escreva cabeçalhos além das categorias STRIDE. Seja específico para Azure."
     )
 
+    # Prompt para ameaças
     prompt_a = f"""
     {base_rules}
     Analise o componente de arquitetura "{component_name}" usando STRIDE.
@@ -597,6 +708,7 @@ def call_gemini_stride(llm: str, component_name: str) -> Tuple[str, str]:
     except Exception as e:
         analysis = f"[Erro ao obter análise do Gemini: {e}]"
 
+    # Prompt para mitigações
     prompt_m = f"""
     {base_rules}
     Com base nas ameaças a seguir, liste MITIGAÇÕES práticas (1 linha por bullet) por categoria STRIDE, 3–6 bullets cada:
@@ -611,22 +723,27 @@ def call_gemini_stride(llm: str, component_name: str) -> Tuple[str, str]:
     except Exception as e:
         mitig = f"[Erro ao obter mitigações do Gemini: {e}]"
 
-    # pós-processa para garantir pt-BR
+    # Normalizações para PT-BR e remoção de artefatos
     analysis = ensure_ptbr(analysis)
     mitig   = ensure_ptbr(mitig)
 
+    # Grava em cache
     LLM_CACHE[key] = (analysis, mitig)
     return analysis, mitig
 
 
-# ---------- OpenAI ----------
 def call_openai_stride(llm: str, component_name: str) -> Tuple[str, str]:
-    """Retorna (análise, mitigações) via OpenAI. Sempre em PT-BR e sem artefatos S/T/R/I/D/E."""
+    """
+    Retorna (análise, mitigações) via OpenAI (LangChain ChatOpenAI).
+    - Força PT-BR
+    - Remove artefatos 'S - Spoofing', etc.
+    """
     key = f"{llm}_{component_name}"
     if key in LLM_CACHE:
         return LLM_CACHE[key]
 
     if DISABLE_LLM or _openai is None:
+        # Placeholders quando LLM está desligado
         analysis = (
             "Spoofing: riscos de representação de identidades.\n"
             "Tampering: alterações não autorizadas em configurações e dados.\n"
@@ -653,6 +770,7 @@ def call_openai_stride(llm: str, component_name: str) -> Tuple[str, str]:
         "Formato OBRIGATÓRIO: blocos por categoria STRIDE, cada um contendo de 3 a 6 bullets curtos."
     )
 
+    # Prompt para ameaças
     prompt_a = f"""
     {base_rules}
     Analise o componente de arquitetura "{component_name}" usando STRIDE (Spoofing, Tampering, Repudiation,
@@ -666,6 +784,7 @@ def call_openai_stride(llm: str, component_name: str) -> Tuple[str, str]:
     except Exception as e:
         analysis = f"[Erro ao obter análise do OpenAI: {e}]"
 
+    # Prompt para mitigações
     prompt_m = f"""
     {base_rules}
     Agora, com base nas ameaças acima, gere MITIGAÇÕES PRÁTICAS para cada categoria STRIDE (3 a 6 bullets cada).
@@ -681,16 +800,17 @@ def call_openai_stride(llm: str, component_name: str) -> Tuple[str, str]:
     except Exception as e:
         mitig = f"[Erro ao obter mitigações do OpenAI: {e}]"
 
-    # pós-processamento: PT-BR + remoção de artefatos
+    # Pós-processamento
     analysis = ensure_ptbr(strip_stride_artifacts(analysis))
     mitig   = ensure_ptbr(strip_stride_artifacts(mitig))
 
     LLM_CACHE[key] = (analysis, mitig)
     return analysis, mitig
 
+# ============================================================
+# Geração de PDF (A4) com cabeçalho, imagens e listas
+# ============================================================
 
-
-# ---------- PDF ----------
 def build_pdf_a4(
     pdf_path: str,
     title: str,
@@ -699,11 +819,17 @@ def build_pdf_a4(
     logo_path: str | None,
     source_image_path: str,
     labeled_image_path: str,
-    legend: str,
+    legend: List[str],
     llm: str,
     per_component: List[Tuple[str, str, str]],
 ):
-    """Gera PDF A4 com paginação automática e listas/bold."""
+    """
+    Monta o PDF final com:
+      • Cabeçalho (cor da marca + logo + timestamp)
+      • Figura 1: diagrama original
+      • Figura 2: diagrama anotado + legenda
+      • Seções por componente (Análise STRIDE + Mitigações)
+    """
     W, H = A4
     try:
         primary = HexColor(brand_color)
@@ -725,6 +851,7 @@ def build_pdf_a4(
     )
 
     def _header(canvas, doc):
+        """Cabeçalho repetido em todas as páginas."""
         canvas.saveState()
         canvas.setFillColor(primary)
         canvas.rect(0, H - 70, W, 70, fill=True, stroke=False)
@@ -747,6 +874,7 @@ def build_pdf_a4(
     story = []
 
     def _image_block(path, caption, max_h, legend=None):
+        """Adiciona imagem com legenda textual opcional logo abaixo."""
         if not path or not os.path.exists(path):
             return
         try:
@@ -756,7 +884,7 @@ def build_pdf_a4(
             story.append(Paragraph(f"<b>{caption}</b>", ParagraphStyle("cap", parent=body, fontSize=11)))
             story.append(Spacer(1, 10))
             story.append(img)
-            if(legend):
+            if legend:
                 for text in legend:
                     story.append(Paragraph(f"{text}"))
         except Exception:
@@ -768,10 +896,12 @@ def build_pdf_a4(
     _image_block(labeled_image_path, "Figura 2 — Diagrama anotado (detecções)", max_img_h, legend)
     story.append(PageBreak())
 
+    # Limita o número de componentes (evita PDFs gigantes)
     iter_components = per_component if MAX_COMPONENTS <= 0 else per_component[:MAX_COMPONENTS]
     for comp_name, analysis, mitig in iter_components:
         story.append(Paragraph(comp_name, h_comp))
 
+        # Análise STRIDE estruturada em listas por categoria
         story.append(Paragraph("Análise STRIDE:", h_label))
         a_sections = parse_stride_sections(analysis)
         has_any = any(a_sections.get(k) for k in _STRIDE_CANON)
@@ -781,13 +911,18 @@ def build_pdf_a4(
                 if not items:
                     continue
                 story.append(Paragraph(cat, ParagraphStyle("cat", parent=body, fontName="Helvetica-Bold")))
-                story.append(ListFlowable([ListItem(Paragraph(_sanitize_para(i), body), leftIndent=6) for i in items],
-                                          bulletType="bullet", start="•", leftIndent=12))
+                story.append(
+                    ListFlowable(
+                        [ListItem(Paragraph(_sanitize_para(i), body), leftIndent=6) for i in items],
+                        bulletType="bullet", start="•", leftIndent=12
+                    )
+                )
                 story.append(Spacer(1, 4))
         else:
             story.append(Paragraph(_sanitize_para(analysis or "—"), body))
         story.append(Spacer(1, 6))
 
+        # Mitigações estruturadas
         story.append(Paragraph("Mitigações sugeridas:", h_label))
         m_sections = parse_stride_sections(mitig)
         has_any_m = any(m_sections.get(k) for k in _STRIDE_CANON)
@@ -797,16 +932,24 @@ def build_pdf_a4(
                 if not items:
                     continue
                 story.append(Paragraph(cat, ParagraphStyle("cat", parent=body, fontName="Helvetica-Bold")))
-                story.append(ListFlowable([ListItem(Paragraph(_sanitize_para(i), body), leftIndent=6) for i in items],
-                                          bulletType="bullet", start="•", leftIndent=12))
+                story.append(
+                    ListFlowable(
+                        [ListItem(Paragraph(_sanitize_para(i), body), leftIndent=6) for i in items],
+                        bulletType="bullet", start="•", leftIndent=12
+                    )
+                )
                 story.append(Spacer(1, 4))
         else:
             story.append(Paragraph(_sanitize_para(mitig or "—"), body))
         story.append(Spacer(1, 10))
 
+    # Constrói documento com cabeçalho em todas as páginas
     doc.build(story, onFirstPage=_header, onLaterPages=_header)
 
-# ---------- HTML (Jinja) ----------
+# ============================================================
+# Templates HTML (Jinja) embutidos em strings
+# ============================================================
+
 BASE_HTML = r"""
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -816,7 +959,6 @@ BASE_HTML = r"""
   <title>{{ page_title or 'Analisador STRIDE para Diagramas - Grupo 7 - 4IADT' }}</title>
   <style>
     :root{ --brand: {{ primary_color }}; --accent: {{ secondary_color }}; }
-    /* Dark theme */
     html,body{ height:100%; }
     body{ font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:0; background:#0B1220; color:#E5E7EB; }
     header{ background: #0D1326; border-bottom:1px solid #111827; color:#fff; padding: 18px 16px; position:sticky; top:0; z-index:10; }
@@ -833,11 +975,6 @@ BASE_HTML = r"""
       width:100%; box-sizing:border-box; height:44px; border:1px solid #374151; border-radius:10px; padding:10px; background:#111827; color:#F9FAFB;
     }
     input[type="file"]{ padding:8px; }
-    input[type="color"]{ -webkit-appearance:none; appearance:none; padding:0; cursor:pointer; background:#111827; }
-    input[type="color"]::-webkit-color-swatch-wrapper{ padding:4px; border-radius:10px; }
-    input[type="color"]::-webkit-color-swatch{ border:none; border-radius:8px; }
-    input[type="color"]::-moz-focus-inner{ padding:0; border:0; }
-    input[type="color"]::-moz-color-swatch{ border:none; border-radius:8px; padding:0; }
     .preview-img{ max-width:100%; border-radius:12px; border:1px solid #1F2937; }
     footer{ text-align:center; padding:24px; color:#94A3B8; font-size:12px; }
     .brand-bar{ display:flex; align-items:center; gap:12px; }
@@ -862,7 +999,7 @@ BASE_HTML = r"""
       {% if brand_logo %}<img src="{{ brand_logo }}" class="brand-logo" alt="logo">{% endif %}
       <div>
         <h1>{{ header_title or 'Analisador STRIDE para Diagramas' }}</h1>
-        <div class="tip">{{ header_subtitle or 'Detecte componentes (YOLO), gere análise e exporte PDF A4' }}</div>
+        <div class="tip">{{ header_subtitle or 'Detecta componentes (YOLO), gera análise e exporte PDF A4' }}</div>
       </div>
     </div>
   </header>
@@ -924,13 +1061,9 @@ INDEX_HTML = r"""
         <div class="model-selector">
             <label class="label">LLM Model
                 <input type="radio" id="gemini" name="llm_model" value="Gemini" checked style="margin-left: 20px;">
-                <label for="gemini"  style="">
-                    <img src="./static/gemini.png" alt="Gemini Icon">Gemini
-                </label>
+                <label for="gemini"><img src="./static/gemini.png" alt="Gemini Icon">Gemini</label>
                 <input type="radio" id="openai" name="llm_model" value="OpenAI">
-                <label for="openai">
-                    <img src="./static/openai.ico" alt="OpenAI Icon">OpenAI
-                </label>
+                <label for="openai"><img src="./static/openai.ico" alt="OpenAI Icon">OpenAI</label>
             </label>
         </div>
     </div>
@@ -947,6 +1080,7 @@ INDEX_HTML = r"""
   </form>
 </div>
 <script>
+    // Atualiza placeholder do subtítulo conforme o LLM selecionado
     document.addEventListener('DOMContentLoaded', function() {
         const textInput = document.getElementById('subtitle');
         const radioButtons = document.querySelectorAll('input[name="llm_model"]');
@@ -1069,6 +1203,7 @@ RESULTS_HTML = r"""
 </div>
 
 <script>
+  // Botões para expandir/recolher todos os <details>
   const allDetails = () => Array.from(document.querySelectorAll('details'));
   document.getElementById('expand-all').addEventListener('click', () => allDetails().forEach(d => d.open = true));
   document.getElementById('collapse-all').addEventListener('click', () => allDetails().forEach(d => d.open = false));
@@ -1076,12 +1211,17 @@ RESULTS_HTML = r"""
 {% endblock %}
 """
 
+# Registra os templates no Jinja a partir de strings
 from jinja2 import DictLoader
 app.jinja_loader = DictLoader({"base.html": BASE_HTML, "index.html": INDEX_HTML, "results.html": RESULTS_HTML})
 
-# ---------- Rotas ----------
+# ============================================================
+# Rotas Flask
+# ============================================================
+
 @app.get("/")
 def index():
+    """Tela inicial para upload do diagrama e seleção de opções."""
     return render_template_string(
         app.jinja_loader.get_source(app.jinja_env, "index.html")[0],
         page_title="Analisador STRIDE para Diagramas - Grupo 7 - 4IADT",
@@ -1098,7 +1238,17 @@ def index():
 
 @app.post("/analyze")
 def analyze():
+    """
+    Pipeline principal:
+      1) valida upload e salva arquivos
+      2) redimensiona imagem (se necessário)
+      3) roda YOLO e aplica NMS
+      4) anota imagem e gera legenda
+      5) para cada componente único: consulta LLM (ou placeholders)
+      6) monta PDF e exibe página de resultado
+    """
     try:
+        # ----------------- validações de upload -----------------
         if "diagram" not in request.files:
             flash("Selecione um diagrama.")
             return redirect(url_for("index"))
@@ -1110,6 +1260,7 @@ def analyze():
             flash("Formato não permitido. Use PNG ou JPG.")
             return redirect(url_for("index"))
 
+        # ----------------- parâmetros da UI -----------------
         llm = request.form.get("llm_model")
         title = request.form.get("title", "").strip() or "Relatório de Ameaças STRIDE"
         subtitle = request.form.get("subtitle", "").strip() or f"Análise automatizada por YOLO + {llm}"
@@ -1117,13 +1268,13 @@ def analyze():
         secondary = request.form.get("secondary", "#22D3EE")
         quick = request.form.get("quick", "1" if QUICK_DEFAULT else "0") == "1"
 
-        # Salva diagrama e downscale
+        # ----------------- salva diagrama -----------------
         filename = secure_filename(diagram.filename)
         src_path = os.path.join(UPLOAD_FOLDER, f"{int(time.time())}_{filename}")
         diagram.save(src_path)
         src_path = _resize_if_large(src_path, FAST_IMG_MAX_SIDE)
 
-        # Logo (opcional)
+        # ----------------- opcional: logo -----------------
         logo_path = None
         if "logo" in request.files and request.files["logo"].filename:
             logo = request.files["logo"]
@@ -1132,31 +1283,32 @@ def analyze():
                 logo_path = os.path.join(UPLOAD_FOLDER, f"logo_{int(time.time())}_{logo_filename}")
                 logo.save(logo_path)
         else:
+            # fallback para um logo padrão em static/
             logo_filename = "postech.png"
             logo = Image.open(os.path.join(STATIC_FOLDER, logo_filename))
             logo_path = os.path.join(UPLOAD_FOLDER, f"logo_{int(time.time())}_{logo_filename}")
             logo.save(logo_path)
 
-        # YOLO
+        # ----------------- YOLO: detecção -----------------
         model = get_yolo()
         results = model.predict(
             source=src_path,
-            conf=max(0.25, YOLO_CONF),
+            conf=max(0.25, YOLO_CONF),     # garante um mínimo para evitar ruído
             save=False,
             verbose=False,
             device=0 if _HAS_CUDA else "cpu",
             half=_HAS_CUDA,
-            #imgsz=FAST_IMG_MAX_SIDE,
+            # imgsz=FAST_IMG_MAX_SIDE,    # pode habilitar se quiser fixar tamanho
             max_det=YOLO_MAX_DET,
             agnostic_nms=True,
         )
         names_map = getattr(model, "names", {})
         detections = nms_iou_filter(results[0].boxes.data, names_map, iou_threshold=NMS_IOU)
 
-        # Anotação
+        # ----------------- anotação visual -----------------
         labeled_path, legend_lines = annotate_image(src_path, detections, color_hex=primary)
 
-        # Componentes únicos
+        # ----------------- gera análise por componente único -----------------
         components = []
         vistos = set()
         iter_boxes = detections if MAX_COMPONENTS <= 0 else detections[:MAX_COMPONENTS]
@@ -1166,23 +1318,23 @@ def analyze():
             if comp in vistos:
                 continue
             vistos.add(comp)
-            #print(f"LLM_CACHE: {LLM_CACHE}")
+
+            # Se quick==True, força placeholders (como se LLM estivesse desabilitado)
             if quick:
                 global DISABLE_LLM
                 prev = DISABLE_LLM
                 DISABLE_LLM = True
-                #print(f"quick stride: {comp}")
                 analysis, mitig = call_gemini_stride("", comp)
                 DISABLE_LLM = prev
             else:
-                if(llm=="Gemini"):
-                    #print(f"gemini stride: {comp}")
+                if llm == "Gemini":
                     analysis, mitig = call_gemini_stride(llm, comp)
-                elif(llm=="OpenAI"):
-                    #print(f"openai stride: {comp}")
+                elif llm == "OpenAI":
                     analysis, mitig = call_openai_stride(llm, comp)
+                else:
+                    analysis, mitig = call_gemini_stride("", comp)
 
-            # Estrutura + HTML seguro para web
+            # Estrutura para a UI: mantém bruto + versão por seções + HTML seguro
             a_secs = parse_stride_sections(analysis)
             m_secs = parse_stride_sections(mitig)
             a_secs_html = sections_to_html(a_secs)
@@ -1202,7 +1354,7 @@ def analyze():
                 }
             )
 
-        # PDF
+        # ----------------- gera PDF -----------------
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         pdf_name = f"relatorio_stride_{ts}.pdf"
         pdf_path = os.path.join(OUTPUT_FOLDER, pdf_name)
@@ -1219,6 +1371,7 @@ def analyze():
             per_component=[(c["name"], c["analysis"], c["mitigations"]) for c in components],
         )
 
+        # ----------------- renderiza página de resultado -----------------
         return render_template_string(
             app.jinja_loader.get_source(app.jinja_env, "results.html")[0],
             page_title=title,
@@ -1238,12 +1391,19 @@ def analyze():
             year=datetime.now().year,
         )
     except Exception as e:
+        # Em caso de erro, loga stack trace e volta para a página inicial com mensagem
         traceback.print_exc()
         flash(f"Erro ao processar: {e}")
         return redirect(url_for("index"))
 
 @app.get("/f/<path:folder>/<path:filename>")
 def serve_file(folder: str, filename: str):
+    """
+    Rota para servir arquivos gerados:
+      /f/uploads/<file>   → imagens enviadas (sem download forçado)
+      /f/previews/<file>  → imagens anotadas (sem download forçado)
+      /f/outputs/<file>   → PDFs (download)
+    """
     if folder == "uploads":
         return send_from_directory(UPLOAD_FOLDER, filename, as_attachment=False)
     if folder == "previews":
@@ -1252,7 +1412,10 @@ def serve_file(folder: str, filename: str):
         return send_from_directory(OUTPUT_FOLDER, filename, as_attachment=True)
     return "Not found", 404
 
-# Dockerfile opcional
+# ============================================================
+# Dockerfile (template) – opcional
+# ============================================================
+
 DOCKERFILE_TEMPLATE = r"""
 FROM python:3.11-slim
 WORKDIR /app
@@ -1267,22 +1430,27 @@ EXPOSE 5000
 CMD ["python", "app.py"]
 """
 
-if __name__ == "__main__":
-    import ssl, os
+# ============================================================
+# Entrypoint
+# ============================================================
 
-    # aponte para seus arquivos
-    cert_path = os.getenv("SSL_CERT", "cert.pem")   # ou cert.pem
-    key_path  = os.getenv("SSL_KEY",  "key.pem")     # ou key.pem
+if __name__ == "__main__":
+    import ssl
+
+    # Certificado/Chave para HTTPS local (opcional)
+    cert_path = os.getenv("SSL_CERT", "cert.pem")
+    key_path  = os.getenv("SSL_KEY",  "key.pem")
 
     ssl_ctx = None
     if os.path.exists(cert_path) and os.path.exists(key_path):
         ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        # (opcional) exigir TLS 1.2+
+        # força TLS >= 1.2 quando disponível
         try:
             ssl_ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         except Exception:
             pass
         ssl_ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
 
+    # Sobe o Flask (com/sem SSL)
     app.run(host="0.0.0.0", port=5000, debug=True, ssl_context=ssl_ctx)
-    # app.run(host="0.0.0.0", port=5000, debug=True)
+    # app.run(host="0.0.0.0", port=5000, debug=True)  # alternativa sem SSL
