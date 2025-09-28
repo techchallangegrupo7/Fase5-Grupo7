@@ -42,6 +42,7 @@ Ele une **Visão Computacional (YOLO)** + **LLMs (Gemini/OpenAI)** + **Flask** +
 ├── 3_aux_validacao_qtd_classes_images.py # Relatório de distribuição de classes
 ├── 4_stride_gemini.py                    # Integra YOLO + LLM → gera PDF STRIDE
 ├── app.py                                # Interface Flask (upload, análise, relatório)
+├── FASE5.ipynb                           # Notebook principal do projeto
 ├── .env                                  # Variáveis de ambiente
 ├── dataset/                              # Dataset de treino/teste YOLO
 │   ├── images/                           # Ícones base
@@ -55,7 +56,7 @@ Ele une **Visão Computacional (YOLO)** + **LLMs (Gemini/OpenAI)** + **Flask** +
 
 ---
 
-## 📜 Arquivos Python
+## 📜 Arquivos Python e Notebook
 
 ### `1_gera_label.py`
 
@@ -93,7 +94,13 @@ Ele une **Visão Computacional (YOLO)** + **LLMs (Gemini/OpenAI)** + **Flask** +
 - Rota `/f/<folder>/<filename>` → serve arquivos (PDFs, imagens anotadas).
 - Gerencia `uploads/`, `previews/` e `outputs/`.
 - Usa `dotenv` para carregar variáveis.
-- 
+
+### `FASE5.ipynb`
+
+- Notebook principal do projeto.
+- Contém a integração dos módulos, experimentos, testes e execução completa da solução.
+- Serve como documentação técnica e pipeline consolidado.
+
 ---
 
 ## 🔑 Arquivo `.env`
