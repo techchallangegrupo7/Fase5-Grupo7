@@ -89,7 +89,7 @@ def filtrar_deteccoes_por_iou(boxes, names_map, iou_threshold=0.5):
 # =unda
 # 3. Carregamento de Modelos e Dados
 # ======================
-model_path = r"D:\_fiap\treinamentoModeloYolo\dataset\best.pt"
+model_path = r"D:\_fiap\Fase5-Grupo7\dataset\treinamento_yolo_aws_best.pt"
 try:
     model_yolo = YOLO(model_path)
 except Exception as e:
@@ -97,8 +97,8 @@ except Exception as e:
     exit()
 
 image_paths = [
-    r"D:\_fiap\treinamentoModeloYolo\Arquiteturas Imagens\arch_azure.png",
-    r"D:\_fiap\treinamentoModeloYolo\Arquiteturas Imagens\arch_aws.png"
+    r"D:\_fiap\Fase5-Grupo7\Arquiteturas Imagens\arch_azure.png",
+    r"D:\_fiap\Fase5-Grupo7\Arquiteturas Imagens\arch_aws.png"
 ]
 try:
     font = ImageFont.truetype("arial.ttf", 20)

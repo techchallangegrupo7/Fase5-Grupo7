@@ -1,0 +1,102 @@
+
+==================================================
+  RELATÓRIO PARA O DIRETÓRIO: 'dataset/yolo_sem_rotacao/test/labels'
+==================================================
+  O NÚMERO 0, ENCONTRADO 48 vezes neste diretório.
+  O NÚMERO 1, ENCONTRADO 62 vezes neste diretório.
+  O NÚMERO 2, ENCONTRADO 38 vezes neste diretório.
+  O NÚMERO 3, ENCONTRADO 53 vezes neste diretório.
+  O NÚMERO 4, ENCONTRADO 54 vezes neste diretório.
+  O NÚMERO 5, ENCONTRADO 59 vezes neste diretório.
+  O NÚMERO 6, ENCONTRADO 56 vezes neste diretório.
+  O NÚMERO 7, ENCONTRADO 43 vezes neste diretório.
+  O NÚMERO 8, ENCONTRADO 43 vezes neste diretório.
+  O NÚMERO 9, ENCONTRADO 44 vezes neste diretório.
+  O NÚMERO 10, ENCONTRADO 57 vezes neste diretório.
+  O NÚMERO 11, ENCONTRADO 46 vezes neste diretório.
+  O NÚMERO 12, ENCONTRADO 44 vezes neste diretório.
+  O NÚMERO 13, ENCONTRADO 54 vezes neste diretório.
+  O NÚMERO 14, ENCONTRADO 44 vezes neste diretório.
+  O NÚMERO 15, ENCONTRADO 45 vezes neste diretório.
+  O NÚMERO 16, ENCONTRADO 54 vezes neste diretório.
+  O NÚMERO 17, ENCONTRADO 43 vezes neste diretório.
+  O NÚMERO 18, ENCONTRADO 46 vezes neste diretório.
+  O NÚMERO 19, ENCONTRADO 51 vezes neste diretório.
+  O NÚMERO 20, ENCONTRADO 47 vezes neste diretório.
+  O NÚMERO 21, ENCONTRADO 50 vezes neste diretório.
+  O NÚMERO 22, ENCONTRADO 46 vezes neste diretório.
+  O NÚMERO 23, ENCONTRADO 48 vezes neste diretório.
+  O NÚMERO 24, ENCONTRADO 49 vezes neste diretório.
+  O NÚMERO 25, ENCONTRADO 48 vezes neste diretório.
+  O NÚMERO 26, ENCONTRADO 50 vezes neste diretório.
+  O NÚMERO 27, ENCONTRADO 42 vezes neste diretório.
+  O NÚMERO 28, ENCONTRADO 57 vezes neste diretório.
+  O NÚMERO 29, ENCONTRADO 42 vezes neste diretório.
+
+==================================================
+  RELATÓRIO PARA O DIRETÓRIO: 'dataset/yolo_sem_rotacao/val/labels'
+==================================================
+  O NÚMERO 0, ENCONTRADO 47 vezes neste diretório.
+  O NÚMERO 1, ENCONTRADO 42 vezes neste diretório.
+  O NÚMERO 2, ENCONTRADO 55 vezes neste diretório.
+  O NÚMERO 3, ENCONTRADO 50 vezes neste diretório.
+  O NÚMERO 4, ENCONTRADO 53 vezes neste diretório.
+  O NÚMERO 5, ENCONTRADO 60 vezes neste diretório.
+  O NÚMERO 6, ENCONTRADO 50 vezes neste diretório.
+  O NÚMERO 7, ENCONTRADO 46 vezes neste diretório.
+  O NÚMERO 8, ENCONTRADO 59 vezes neste diretório.
+  O NÚMERO 9, ENCONTRADO 53 vezes neste diretório.
+  O NÚMERO 10, ENCONTRADO 51 vezes neste diretório.
+  O NÚMERO 11, ENCONTRADO 51 vezes neste diretório.
+  O NÚMERO 12, ENCONTRADO 48 vezes neste diretório.
+  O NÚMERO 13, ENCONTRADO 46 vezes neste diretório.
+  O NÚMERO 14, ENCONTRADO 58 vezes neste diretório.
+  O NÚMERO 15, ENCONTRADO 49 vezes neste diretório.
+  O NÚMERO 16, ENCONTRADO 39 vezes neste diretório.
+  O NÚMERO 17, ENCONTRADO 57 vezes neste diretório.
+  O NÚMERO 18, ENCONTRADO 41 vezes neste diretório.
+  O NÚMERO 19, ENCONTRADO 52 vezes neste diretório.
+  O NÚMERO 20, ENCONTRADO 57 vezes neste diretório.
+  O NÚMERO 21, ENCONTRADO 46 vezes neste diretório.
+  O NÚMERO 22, ENCONTRADO 51 vezes neste diretório.
+  O NÚMERO 23, ENCONTRADO 49 vezes neste diretório.
+  O NÚMERO 24, ENCONTRADO 49 vezes neste diretório.
+  O NÚMERO 25, ENCONTRADO 48 vezes neste diretório.
+  O NÚMERO 26, ENCONTRADO 42 vezes neste diretório.
+  O NÚMERO 27, ENCONTRADO 51 vezes neste diretório.
+  O NÚMERO 28, ENCONTRADO 48 vezes neste diretório.
+  O NÚMERO 29, ENCONTRADO 41 vezes neste diretório.
+
+==================================================
+  RELATÓRIO PARA O DIRETÓRIO: 'dataset/yolo_sem_rotacao/train/labels'
+==================================================
+  O NÚMERO 0, ENCONTRADO 258 vezes neste diretório.
+  O NÚMERO 1, ENCONTRADO 245 vezes neste diretório.
+  O NÚMERO 2, ENCONTRADO 267 vezes neste diretório.
+  O NÚMERO 3, ENCONTRADO 219 vezes neste diretório.
+  O NÚMERO 4, ENCONTRADO 222 vezes neste diretório.
+  O NÚMERO 5, ENCONTRADO 220 vezes neste diretório.
+  O NÚMERO 6, ENCONTRADO 230 vezes neste diretório.
+  O NÚMERO 7, ENCONTRADO 239 vezes neste diretório.
+  O NÚMERO 8, ENCONTRADO 248 vezes neste diretório.
+  O NÚMERO 9, ENCONTRADO 236 vezes neste diretório.
+  O NÚMERO 10, ENCONTRADO 233 vezes neste diretório.
+  O NÚMERO 11, ENCONTRADO 234 vezes neste diretório.
+  O NÚMERO 12, ENCONTRADO 227 vezes neste diretório.
+  O NÚMERO 13, ENCONTRADO 243 vezes neste diretório.
+  O NÚMERO 14, ENCONTRADO 222 vezes neste diretório.
+  O NÚMERO 15, ENCONTRADO 206 vezes neste diretório.
+  O NÚMERO 16, ENCONTRADO 241 vezes neste diretório.
+  O NÚMERO 17, ENCONTRADO 234 vezes neste diretório.
+  O NÚMERO 18, ENCONTRADO 234 vezes neste diretório.
+  O NÚMERO 19, ENCONTRADO 221 vezes neste diretório.
+  O NÚMERO 20, ENCONTRADO 223 vezes neste diretório.
+  O NÚMERO 21, ENCONTRADO 230 vezes neste diretório.
+  O NÚMERO 22, ENCONTRADO 239 vezes neste diretório.
+  O NÚMERO 23, ENCONTRADO 214 vezes neste diretório.
+  O NÚMERO 24, ENCONTRADO 215 vezes neste diretório.
+  O NÚMERO 25, ENCONTRADO 223 vezes neste diretório.
+  O NÚMERO 26, ENCONTRADO 222 vezes neste diretório.
+  O NÚMERO 27, ENCONTRADO 224 vezes neste diretório.
+  O NÚMERO 28, ENCONTRADO 232 vezes neste diretório.
+  O NÚMERO 29, ENCONTRADO 242 vezes neste diretório.

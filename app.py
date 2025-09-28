@@ -102,7 +102,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "gpt-5-nano")
 
 # Caminho para os pesos do YOLO (.pt)
-YOLO_WEIGHTS = os.getenv("YOLO_WEIGHTS", os.path.join("weights", "best.pt"))
+YOLO_WEIGHTS = os.getenv("YOLO_WEIGHTS", os.path.join("weights", "treinamento_yolo_aws_best.pt"))
 
 # IOU do NMS (quanto maior, mais caixas sobrepostas serão mantidas)
 NMS_IOU = float(os.getenv("NMS_IOU", "0.5"))
@@ -1424,7 +1424,7 @@ RUN apt-get update && apt-get install -y build-essential libjpeg62-turbo-dev zli
 COPY . /app
 RUN pip install --no-cache-dir flask==3.0.3 google-generativeai==0.7.2 ultralytics==8.2.103 pillow==10.4.0 reportlab==4.2.2 python-dotenv==1.0.1 werkzeug==3.0.3
 ENV GEMINI_API_KEY=""
-ENV YOLO_WEIGHTS=/app/weights/best.pt
+ENV YOLO_WEIGHTS=/app/weights/treinamento_yolo_aws_best.pt
 ENV APP_SECRET_KEY=change_me
 EXPOSE 5000
 CMD ["python", "app.py"]

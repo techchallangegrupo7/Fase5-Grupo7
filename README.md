@@ -108,7 +108,7 @@ OPENAI_API_KEY=SEU_TOKEN_AQUI
 OPENAI_MODEL=gpt-4.1-mini
 
 # YOLO
-YOLO_WEIGHTS=./dataset/best.pt
+YOLO_WEIGHTS=./dataset/treinamento_yolo_aws_best.pt
 
 # Flask
 APP_SECRET_KEY=troque_isto_em_producao

@@ -63,7 +63,7 @@ def processar_diretorios_e_exportar(diretorios, nome_arquivo_saida):
         print(f"Erro ao exportar o arquivo de relatório: {e}")
 
 # Lista dos diretórios a serem processados
-diretorios_a_processar = ['dataset/yolo_synthetic/test/labels', 'dataset/yolo_synthetic/val/labels', 'dataset/yolo_synthetic/train/labels']
+diretorios_a_processar = ['dataset/yolo_sem_rotacao/test/labels', 'dataset/yolo_sem_rotacao/val/labels', 'dataset/yolo_sem_rotacao/train/labels']
 
 # Nome do arquivo de saída
 nome_do_arquivo = 'relatorio.txt'

@@ -5,5 +5,5 @@ Rodar o python na seguinte ordem:
  3_Treinar o modelo FASE5.py  no colab
  4_stride.py (roda o yolo e já faz o relatório)
  
- Último modelo gerado foi o best.pt está na pasta dataset
+ Último modelo gerado foi o treinamento_yolo_aws_best.pt está na pasta dataset
  No driver = > https://drive.google.com/file/d/1FpyJR2KZxG3pX5D0Ut0AcclXEkd29qpm/view?usp=drive_link
