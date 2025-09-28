@@ -285,7 +285,7 @@ def annotate_image(original_path: str, detections: List, color_hex: str = "#0EA5
 LLM_CACHE: Dict[str, Tuple[str, str]] = {}
 
 # --- Parser de texto -> seções STRIDE (bullets por categoria) ---
-import re
+import re, unicodedata
 
 _STRIDE_CANON = [
     "Spoofing",
@@ -296,19 +296,30 @@ _STRIDE_CANON = [
     "Elevation of Privilege",
 ]
 
+# aliases PT/EN
 _STRIDE_ALIASES = {
-    "Spoofing": [r"spoofing"],
-    "Tampering": [r"tampering", r"manipula(?:ç|c)ão"],
-    "Repudiation": [r"repudiation", r"rep(?:ú|u)d[ií]o"],
+    "Spoofing": [
+        r"spoofing", r"personifica(?:ç|c)[aã]o", r"impersona(?:ç|c)[aã]o",
+        r"falsifica(?:ç|c)[aã]o\s+de\s+identidade",
+    ],
+    "Tampering": [
+        r"tampering", r"manipula(?:ç|c)[aã]o", r"alter[aç][aã]o\s+n[aã]o\s+autorizada",
+        r"adultera(?:ç|c)[aã]o",
+    ],
+    "Repudiation": [
+        r"repudiation", r"rep(?:ú|u)d[ií]o", r"n[aã]o\s+rep[uú]dio",
+        r"nega(?:ç|c)[aã]o\s+de\s+autoria",
+    ],
     "Information Disclosure": [
         r"information\s+disclosure",
-        r"divulga(?:ç|c)[aã]o\s+de\s+informa",
+        r"divulga(?:ç|c)[aã]o\s+de\s+informa(?:ç|c)[oõ]es",
+        r"exposi(?:ç|c)[aã]o\s+de\s+dados",
+        r"vazamento\s+de\s+informa(?:ç|c)[oõ]es",
         r"info\s*disclosure",
     ],
     "Denial of Service": [
-        r"denial\s+of\s+service",
+        r"denial\s+of\s+service", r"nega(?:ç|c)[aã]o\s+de\s+servi[cç]o",
         r"\bdo?s\b",
-        r"nega(?:ç|c)[aã]o\s+de\s+servi",
     ],
     "Elevation of Privilege": [
         r"elevation\s+of\s+privilege",
@@ -317,24 +328,37 @@ _STRIDE_ALIASES = {
     ],
 }
 
-# cabeçalho "limpo" (linha só com a categoria)
+_ALIAS_RE = "|".join(rf"(?:{alias})"
+                     for aliases in _STRIDE_ALIASES.values() for alias in aliases)
+
+# Cabeçalho puro (aceita bullet antes e parênteses após)
 _HEADER_PURE_RE = re.compile(
-    r"^\s{0,3}(?:[-*#]+\s*)?(?:\*\*)?\s*(?:[A-Z]\s*-\s*)?(%s)\s*:?\s*(?:\*\*)?\s*$"
-    % "|".join(rf"(?:{alias})"
-               for aliases in _STRIDE_ALIASES.values() for alias in aliases),
-    re.IGNORECASE
+    rf"""^\s{{0,3}}(?:[-*#]+\s*)?
+         (?P<hdr>{_ALIAS_RE})
+         (?:\s*\([^)]*\))?
+         \s*[:\-]?\s*$
+    """,
+    re.IGNORECASE | re.VERBOSE
 )
 
-# cabeçalho inline "Categoria: item já na mesma linha"
+# Cabeçalho inline: "Categoria: texto..." ou "Categoria - texto..."
 _HEADER_INLINE_RE = re.compile(
-    r"^\s*(?:\*\*)?\s*(?:[A-Z]\s*-\s*)?(?P<hdr>%s)\s*:\s*(?:\*\*)?\s*(?P<rest>.+?)\s*$"
-    % "|".join(rf"(?:{alias})"
-               for aliases in _STRIDE_ALIASES.values() for alias in aliases),
-    re.IGNORECASE
+    rf"""^\s*(?P<hdr>{_ALIAS_RE})
+         (?:\s*\([^)]*\))?\s*
+         \s*[:\-]\s*
+         (?P<rest>.+?)\s*$
+    """,
+    re.IGNORECASE | re.VERBOSE
 )
+
+def _normalize_text(s: str) -> str:
+    s = unicodedata.normalize("NFKC", s or "")
+    s = s.replace("•", "*").replace("–", "-").replace("—", "-")
+    s = s.replace("**", "").replace("__", "")
+    return s.strip()
 
 def _canonicalize(header: str) -> str:
-    h = header.strip().lower()
+    h = _normalize_text(header).lower()
     for canon, aliases in _STRIDE_ALIASES.items():
         for a in aliases:
             if re.fullmatch(a, h, flags=re.IGNORECASE):
@@ -344,59 +368,89 @@ def _canonicalize(header: str) -> str:
             return canon
     return header.strip().title()
 
-def parse_stride_sections(text: str) -> dict[str, list[str]]:
-    """
-    Converte texto (bullets/headers) em:
-      { 'Spoofing': [...], 'Tampering': [...], ... }
+# Heurística para bullets órfãos (quando não há categoria ativa)
+_AUTO_BUCKET = {
+    "Spoofing": [r"\bmfa\b", r"identidade", r"impersona", r"phish"],
+    "Tampering": [r"inje(c|ç)[aã]o", r"\balter", r"manipula", r"modifica", r"\biac\b", r"policy"],
+    "Repudiation": [r"auditoria", r"\blogs?\b", r"repud"],
+    "Information Disclosure": [r"criptograf", r"vazam", r"expos", r"\bpii\b", r"token", r"credenciais"],
+    "Denial of Service": [r"\bdo?s\b", r"\bnega", r"exaust", r"indispon", r"\brate\b", r"\bquota"],
+    "Elevation of Privilege": [r"privil", r"eleva", r"\beop\b", r"\brbac\b", r"assumir"],
+}
 
-    Suporta:
-    - "**Spoofing:**" sozinho na linha (cabeçalho puro)
-    - "**Spoofing:** implementar ..." (cabeçalho inline + 1º item)
-    - Bullets iniciados por '*', '-', '•' ou '1.', '2)'
-    - Linhas soltas após um cabeçalho são tratadas como item
-    """
+def _guess_category(text: str) -> str | None:
+    t = _normalize_text(text).lower()
+    best, score = None, 0
+    for cat, pats in _AUTO_BUCKET.items():
+        sc = sum(1 for p in pats if re.search(p, t))
+        if sc > score:
+            best, score = cat, sc
+    return best
+
+def parse_stride_sections(text: str) -> dict[str, list[str]]:
     sections = {k: [] for k in _STRIDE_CANON}
     if not text:
         return sections
 
     current = None
     for raw in text.splitlines():
-        line = raw.strip()
+        line = _normalize_text(raw)
         if not line:
             continue
 
-        # 1) Cabeçalho inline (Categoria: item já na mesma linha)
-        m_inline = _HEADER_INLINE_RE.match(line.replace("**", "").replace("__", ""))
-        if m_inline:
-            current = _canonicalize(m_inline.group("hdr"))
-            sections.setdefault(current, [])
-            first_item = m_inline.group("rest").strip(" -–—:")  # limpa pontuação comum
-            if first_item:
-                sections[current].append(first_item)
+        # 1) Cabeçalho inline
+        m = _HEADER_INLINE_RE.match(line)
+        if m:
+            current = _canonicalize(m.group("hdr"))
+            first = m.group("rest").strip(" -:;")
+            if first:
+                sections[current].append(first)
             continue
 
-        # 2) Cabeçalho puro (só a categoria na linha)
-        m_pure = _HEADER_PURE_RE.match(line.replace("**", "").replace("__", ""))
-        if m_pure:
-            current = _canonicalize(m_pure.group(1))
-            sections.setdefault(current, [])
+        # 2) Cabeçalho puro
+        m = _HEADER_PURE_RE.match(line)
+        if m:
+            current = _canonicalize(m.group("hdr"))
             continue
 
-        # 3) Bullet tradicional
-        if re.match(r"^(\*|-|•|\d+[\.\)])\s+", line):
-            item = re.sub(r"^(\*|-|•|\d+[\.\)])\s+", "", line).strip()
-            if current and item:
+        # 3) Bullet
+        m = re.match(r"^(\*|-|\d+[\.\)])\s+(.*)$", line)
+        if m:
+            item = m.group(2).strip()
+
+            # 3a) bullet que é cabeçalho inline
+            mi = _HEADER_INLINE_RE.match(item)
+            if mi:
+                current = _canonicalize(mi.group("hdr"))
+                rest = mi.group("rest").strip(" -:;")
+                if rest:
+                    sections[current].append(rest)
+                continue
+
+            # 3b) bullet que é cabeçalho puro
+            mp = _HEADER_PURE_RE.match(item)
+            if mp:
+                current = _canonicalize(mp.group("hdr"))
+                continue
+
+            # 3c) bullet normal
+            if current:
                 sections[current].append(item)
+            else:
+                cat = _guess_category(item) or "Tampering"
+                sections[cat].append(item)
             continue
 
-        # 4) Linha solta → vira item da categoria corrente
+        # 4) Linha solta (sem bullet)
         if current:
             sections[current].append(line)
+        else:
+            cat = _guess_category(line) or "Tampering"
+            sections[cat].append(line)
 
     return sections
 
 def _sanitize_para(s: str) -> str:
-    """Converte **bold** em <b> e escapa HTML básico."""
     if not s:
         return ""
     s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
@@ -407,112 +461,234 @@ def _sanitize_para(s: str) -> str:
 def sections_to_html(secs: dict[str, list[str]]) -> dict[str, list[str]]:
     return {k: [_sanitize_para(v) for v in (secs.get(k) or [])] for k in _STRIDE_CANON}
 
+import re
+
+_PT_REPLACEMENTS = [
+    # conceitos gerais
+    (r"\bLeast Privilege\b", "menor privilégio"),
+    (r"\bPrinciple of Least Privilege\b", "princípio do menor privilégio"),
+    (r"\bRole-?Based Access Control\b", "controle de acesso baseado em função (RBAC)"),
+    (r"\bJust-?In-?Time\b", "just-in-time"),
+    (r"\bRate Limiting\b", "limitação de taxa"),
+    (r"\bThrottling\b", "limitação de taxa"),
+    (r"\bDenial of Wallet\b", "negação de carteira (custos)"),
+    (r"\bBlueprints?\b", "Blueprints"),
+    (r"\bResource Locks?\b", "bloqueios de recursos"),
+    (r"\bWrite-Once-Read-Many\b", "grava-uma-vez/lê-muitas (WORM)"),
+    (r"\bKey Vault\b", "Key Vault"),
+    (r"\bService Principals?\b", "Service Principal"),
+    (r"\bManaged Identities?\b", "Identidade Gerenciada"),
+    (r"\bWeb Application Firewall\b", "WAF (Firewall de Aplicação Web)"),
+    (r"\bCertificate Pinning\b", "fixação de certificado"),
+    (r"\bProof[- ]of[- ]Possession\b", "prova de posse (PoP)"),
+    (r"\bHSTS\b", "HSTS"),
+    (r"\bTLS\b", "TLS"),
+    (r"\bHTTP Strict Transport Security\b", "HSTS (política de transporte estrito)"),
+    (r"\bAudit (?:Logs?|Logging)\b", "logs de auditoria"),
+    (r"\bSIEM\b", "SIEM"),
+    (r"\bDDoS\b", "DDoS"),
+    (r"\bJWTs?\b", "JWT"),
+    # verbos e frases frequentes
+    (r"\bensure\b", "garantir"),
+    (r"\benforce\b", "impor"),
+    (r"\brequire\b", "exigir"),
+    (r"\bconfigure\b", "configurar"),
+    (r"\benable\b", "habilitar"),
+    (r"\bdisable\b", "desabilitar"),
+    (r"\bmonitor\b", "monitorar"),
+    (r"\bsecrets?\b", "segredos"),
+    (r"\bbackends?\b", "backend"),
+]
+
+import re
+
+_SINGLE_LETTER_HDR = re.compile(
+    r"""^\s*           # espaços
+        (?:[-*•#]\s*)? # bullet opcional
+        ([sstrideSSTRIDE]) # uma letra do acrônimo
+        \s*(?:[-–—:])?\s*$ # opcional hífen/:
+    """, re.VERBOSE
+)
+
+_CAT_LINE = re.compile(
+    r"""^\s*([STIRDE])\s*[-–—]?\s*
+        (Spoofing|Tampering|Repudiation|Information\s+Disclosure|Denial\s+of\s+Service|Elevation\s+of\s+Privilege)\s*$
+    """, re.IGNORECASE | re.VERBOSE
+)
+
+def strip_stride_artifacts(text: str) -> str:
+    """Remove linhas 'S/T/R/I/D/E' e cabeçalhos soltos que viram lixo nos bullets."""
+    if not text:
+        return text
+    out_lines = []
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if _SINGLE_LETTER_HDR.match(line):
+            continue  # descarta "S", "T", ...
+        if _CAT_LINE.match(line):
+            continue  # descarta "S - Spoofing" etc. perdidos dentro do corpo
+        out_lines.append(raw)
+    return "\n".join(out_lines)
+
+
+def ensure_ptbr(text: str) -> str:
+    """Conserta termos ingleses comuns mantendo siglas úteis.
+    Não altera cabeçalhos STRIDE (que já estão fixos na UI)."""
+    if not text:
+        return text
+    out = text
+    for pat, repl in _PT_REPLACEMENTS:
+        out = re.sub(pat, repl, out, flags=re.IGNORECASE)
+    # normaliza algumas traduções de categoria que o LLM às vezes injeta dentro do corpo
+    out = re.sub(r"\bInformation Disclosure\b", "Divulgação de Informação", out, flags=re.IGNORECASE)
+    out = re.sub(r"\bElevation of Privilege\b", "Elevação de Privilégio", out, flags=re.IGNORECASE)
+    out = re.sub(r"\bDenial of Service\b", "Negação de Serviço", out, flags=re.IGNORECASE)
+    out = re.sub(r"\bRepudiation\b", "Repúdio", out, flags=re.IGNORECASE)
+    out = re.sub(r"\bTampering\b", "Violação de Integridade (Tampering)", out, flags=re.IGNORECASE)
+    out = re.sub(r"\bSpoofing\b", "Representação (Spoofing)", out, flags=re.IGNORECASE)
+    # evita “S - Spoofing / T - Tampering ...” que o modelo às vezes inclui dentro dos itens
+    out = re.sub(r"^\s*[STIRDE]\s*-\s*(Spoofing|Tampering|Repudiation|Information Disclosure|Denial of Service|Elevation of Privilege)\s*$",
+                 "", out, flags=re.IGNORECASE|re.MULTILINE)
+    return out
+
+
 # ---------- Gemini ----------
 def call_gemini_stride(llm: str, component_name: str) -> Tuple[str, str]:
-    """Retorna (análise, mitigações) via Gemini. Usa cache e placeholders."""
-
+    """Retorna (análise, mitigações) via Gemini. Sempre em PT-BR."""
     key = f"{llm}_{component_name}"
     if key in LLM_CACHE:
         return LLM_CACHE[key]
-    
+
     if DISABLE_LLM or _gemini is None:
         analysis = (
-            "Spoofing: riscos de identidade falsa.\n"
-            "Tampering: alterações não autorizadas.\n"
-            "Repudiation: falta de trilhas de auditoria.\n"
-            "Information Disclosure: exposição indevida.\n"
-            "Denial of Service: indisponibilidade do serviço.\n"
-            "Elevation of Privilege: abuso de permissões."
+            "Spoofing: riscos de representação de identidades.\n"
+            "Tampering: alterações não autorizadas em configurações e dados.\n"
+            "Repudiation: falta de trilhas de auditoria imutáveis.\n"
+            "Information Disclosure: exposição indevida de informações e segredos.\n"
+            "Denial of Service: indisponibilidade por exaustão ou DDoS.\n"
+            "Elevation of Privilege: abuso ou escalonamento de permissões."
         )
         mitig = (
-            "Spoofing: MFA e identidade federada.\n"
-            "Tampering: assinaturas, WORM e versionamento.\n"
-            "Repudiation: logs imutáveis e trilhas.\n"
-            "Info Disclosure: criptografia e DLP.\n"
-            "DoS: rate limiting e autoscaling.\n"
-            "EoP: princípio do menor privilégio."
+            "Spoofing: MFA e autenticação forte entre serviços.\n"
+            "Tampering: políticas, assinatura de artefatos e versionamento.\n"
+            "Repudiation: logs imutáveis e retenção centralizada.\n"
+            "Information Disclosure: criptografia, Key Vault e mínimos privilégios de leitura.\n"
+            "Denial of Service: limitação de taxa e proteção DDoS.\n"
+            "Elevation of Privilege: RBAC com menor privilégio e PIM/JIT."
         )
         return analysis, mitig
 
+    base_rules = (
+        "Responda EXCLUSIVAMENTE em português do Brasil (pt-BR). "
+        "Não use palavras em inglês; quando precisar citar uma sigla (ex.: RBAC, DDoS, TLS), mantenha a sigla e explique em português. "
+        "Formate como listas por categoria STRIDE, sem introduções extras, sem conclusões e sem repetir as categorias dentro dos itens. "
+        "Não escreva cabeçalhos além das categorias STRIDE. Seja específico para Azure."
+    )
+
     prompt_a = f"""
+    {base_rules}
     Analise o componente de arquitetura "{component_name}" usando STRIDE.
-    Gere somente bullets por categoria (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege).
-    Não inclua títulos como 'Análise' ou 'Mitigações'; apenas as listas.
+    Para cada categoria, produza 3–6 bullets objetivos.
     """
+
     try:
         resp_a = _gemini.generate_content(prompt_a)
-        #print(f"resp_a: {resp_a.text}")
-        analysis = resp_a.text
+        analysis = resp_a.text or ""
     except Exception as e:
         analysis = f"[Erro ao obter análise do Gemini: {e}]"
 
     prompt_m = f"""
-    Com base nas ameaças a seguir, liste mitigações objetivas (uma por bullet) por categoria STRIDE.
-    Não inclua cabeçalhos adicionais: apenas as listas por categoria.
-    Ameaças:\n{analysis}
+    {base_rules}
+    Com base nas ameaças a seguir, liste MITIGAÇÕES práticas (1 linha por bullet) por categoria STRIDE, 3–6 bullets cada:
+    ---
+    {analysis}
+    ---
     """
+
     try:
         resp_m = _gemini.generate_content(prompt_m)
-        #print(f"resp_m: {resp_m.text}")
-        mitig = resp_m.text
+        mitig = resp_m.text or ""
     except Exception as e:
         mitig = f"[Erro ao obter mitigações do Gemini: {e}]"
+
+    # pós-processa para garantir pt-BR
+    analysis = ensure_ptbr(analysis)
+    mitig   = ensure_ptbr(mitig)
 
     LLM_CACHE[key] = (analysis, mitig)
     return analysis, mitig
 
+
 # ---------- OpenAI ----------
 def call_openai_stride(llm: str, component_name: str) -> Tuple[str, str]:
-    """Retorna (análise, mitigações) via OpenAI. Usa cache e placeholders."""
+    """Retorna (análise, mitigações) via OpenAI. Sempre em PT-BR e sem artefatos S/T/R/I/D/E."""
     key = f"{llm}_{component_name}"
     if key in LLM_CACHE:
         return LLM_CACHE[key]
 
     if DISABLE_LLM or _openai is None:
         analysis = (
-            "Spoofing: riscos de identidade falsa.\n"
-            "Tampering: alterações não autorizadas.\n"
-            "Repudiation: falta de trilhas de auditoria.\n"
-            "Information Disclosure: exposição indevida.\n"
-            "Denial of Service: indisponibilidade do serviço.\n"
-            "Elevation of Privilege: abuso de permissões."
+            "Spoofing: riscos de representação de identidades.\n"
+            "Tampering: alterações não autorizadas em configurações e dados.\n"
+            "Repudiation: falta de trilhas de auditoria imutáveis.\n"
+            "Information Disclosure: exposição indevida de informações e segredos.\n"
+            "Denial of Service: indisponibilidade por exaustão ou DDoS.\n"
+            "Elevation of Privilege: abuso ou escalonamento de permissões."
         )
         mitig = (
-            "Spoofing: MFA e identidade federada.\n"
-            "Tampering: assinaturas, WORM e versionamento.\n"
-            "Repudiation: logs imutáveis e trilhas.\n"
-            "Info Disclosure: criptografia e DLP.\n"
-            "DoS: rate limiting e autoscaling.\n"
-            "EoP: princípio do menor privilégio."
+            "Spoofing: MFA e autenticação forte entre serviços.\n"
+            "Tampering: políticas, assinatura de artefatos e versionamento.\n"
+            "Repudiation: logs imutáveis e retenção centralizada.\n"
+            "Information Disclosure: criptografia, Key Vault e mínimos privilégios de leitura.\n"
+            "Denial of Service: limitação de taxa e proteção DDoS.\n"
+            "Elevation of Privilege: RBAC com menor privilégio e PIM/JIT."
         )
         return analysis, mitig
 
+    base_rules = (
+        "Responda EXCLUSIVAMENTE em português do Brasil (pt-BR). "
+        "NÃO escreva introdução nem conclusão. "
+        "NÃO repita o nome da categoria dentro dos bullets. "
+        "NÃO use cabeçalhos de uma única letra (S, T, R, I, D, E) nem linhas como 'S - Spoofing'. "
+        "Formato OBRIGATÓRIO: blocos por categoria STRIDE, cada um contendo de 3 a 6 bullets curtos."
+    )
+
     prompt_a = f"""
-    Analise o componente de arquitetura "{component_name}" usando STRIDE.
-    Gere somente bullets por categoria (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege).
-    Não inclua títulos como 'Análise' ou 'Mitigações'; apenas as listas.
+    {base_rules}
+    Analise o componente de arquitetura "{component_name}" usando STRIDE (Spoofing, Tampering, Repudiation,
+    Information Disclosure, Denial of Service, Elevation of Privilege). Seja específico para Azure.
+    Produza SOMENTE os bullets das categorias (sem outros títulos). 
     """
+
     try:
         resp_a = _openai.invoke(prompt_a)
-        #print(f"resp_a: {resp_a.content}")
-        analysis = resp_a.content
+        analysis = getattr(resp_a, "content", "") or ""
     except Exception as e:
-        analysis = f"[Erro ao obter análise do Gemini: {e}]"
+        analysis = f"[Erro ao obter análise do OpenAI: {e}]"
 
     prompt_m = f"""
-    Com base nas ameaças a seguir, liste mitigações objetivas (uma por bullet) por categoria STRIDE.
-    Não inclua cabeçalhos adicionais: apenas as listas por categoria.
-    Ameaças:\n{analysis}
+    {base_rules}
+    Agora, com base nas ameaças acima, gere MITIGAÇÕES PRÁTICAS para cada categoria STRIDE (3 a 6 bullets cada).
+    Apenas bullets, sem cabeçalhos extra. Seja objetivo e use terminologia do Azure.
+    ---
+    {analysis}
+    ---
     """
+
     try:
         resp_m = _openai.invoke(prompt_m)
-        #print(f"resp_m: {resp_m.content}")
-        mitig = resp_m.content
+        mitig = getattr(resp_m, "content", "") or ""
     except Exception as e:
-        mitig = f"[Erro ao obter mitigações do Gemini: {e}]"
+        mitig = f"[Erro ao obter mitigações do OpenAI: {e}]"
+
+    # pós-processamento: PT-BR + remoção de artefatos
+    analysis = ensure_ptbr(strip_stride_artifacts(analysis))
+    mitig   = ensure_ptbr(strip_stride_artifacts(mitig))
 
     LLM_CACHE[key] = (analysis, mitig)
     return analysis, mitig
+
+
 
 # ---------- PDF ----------
 def build_pdf_a4(
@@ -825,71 +1001,71 @@ RESULTS_HTML = r"""
 </div>
 
 <div class="card">
-  <div class="toolbar">
-    <button class="btn" id="expand-all">Expandir tudo</button>
-    <button class="btn secondary" id="collapse-all">Recolher tudo</button>
-  </div>
+    <div class="toolbar">
+        <button class="btn" id="expand-all">Expandir tudo</button>
+        <button class="btn secondary" id="collapse-all">Recolher tudo</button>
+    </div>
 
-  <h2>Componentes detectados</h2>
-  {% if components and components|length %}
-    {% for c in components %}
-      <article class="component" data-comp="{{ c.name }}">
-        <h3>{{ loop.index }}. {{ c.name }}</h3>
+    <h2>Componentes detectados</h2>
+    {% if components and components|length %}
+        {% for c in components %}
+        <article class="component" data-comp="{{ c.name }}">
+            <h3>{{ loop.index }}. {{ c.name }}</h3>
 
-        <details open>
-          <summary>Análise STRIDE</summary>
-          <div class="content">
-            {% set cats = ["Spoofing","Tampering","Repudiation","Information Disclosure","Denial of Service","Elevation of Privilege"] %}
-            {% set ns = namespace(has_struct=false) %}
-            {% for cat in cats %}
-              {% set items = c.analysis_sections_html.get(cat, []) if c.analysis_sections_html else [] %}
-              {% if items and items|length %}
-                {% set ns.has_struct = true %}
-                <details{% if loop.first %} open{% endif %}>
-                  <summary>{{ cat }}</summary>
-                  <div class="content">
-                    <ul>
-                      {% for it in items %}<li>{{ it|safe }}</li>{% endfor %}
-                    </ul>
-                  </div>
-                </details>
-              {% endif %}
-            {% endfor %}
-            {% if not ns.has_struct %}
-              <div class="mono">{{ c.analysis_html|safe }}</div>
-            {% endif %}
-          </div>
-        </details>
+            <details open>
+                <summary>Análise STRIDE</summary>
+                <div class="content">
+                    {% set cats = ["Spoofing","Tampering","Repudiation","Information Disclosure","Denial of Service","Elevation of Privilege"] %}
+                    {% set ns = namespace(has_struct=false) %}
+                    {% for cat in cats %}
+                    {% set items = c.analysis_sections_html.get(cat, []) if c.analysis_sections_html else [] %}
+                    {% if items and items|length %}
+                        {% set ns.has_struct = true %}
+                        <details{% if loop.first %} open{% endif %}>
+                        <summary>{{ cat }}</summary>
+                        <div class="content">
+                            <ul>
+                            {% for it in items %}<li>{{ it|safe }}</li>{% endfor %}
+                            </ul>
+                        </div>
+                        </details>
+                    {% endif %}
+                    {% endfor %}
+                    {% if not ns.has_struct %}
+                    <div class="mono">{{ c.analysis_html|safe }}</div>
+                    {% endif %}
+                </div>
+            </details>
 
-        <details>
-          <summary>Mitigações</summary>
-          <div class="content">
-            {% set cats = ["Spoofing","Tampering","Repudiation","Information Disclosure","Denial of Service","Elevation of Privilege"] %}
-            {% set ns2 = namespace(has_struct=false) %}
-            {% for cat in cats %}
-              {% set items = c.mitig_sections_html.get(cat, []) if c.mitig_sections_html else [] %}
-              {% if items and items|length %}
-                {% set ns2.has_struct = true %}
-                <details>
-                  <summary>{{ cat }}</summary>
-                  <div class="content">
-                    <ul>
-                      {% for it in items %}<li>{{ it|safe }}</li>{% endfor %}
-                    </ul>
-                  </div>
-                </details>
-              {% endif %}
-            {% endfor %}
-            {% if not ns2.has_struct %}
-              <div class="mono">{{ c.mitigations_html|safe }}</div>
-            {% endif %}
-          </div>
-        </details>
-      </article>
-    {% endfor %}
-  {% else %}
-    <div>Nenhum componente detectado acima do limiar.</div>
-  {% endif %}
+            <details>
+            <summary>Mitigações</summary>
+            <div class="content">
+                {% set cats = ["Spoofing","Tampering","Repudiation","Information Disclosure","Denial of Service","Elevation of Privilege"] %}
+                {% set ns2 = namespace(has_struct=false) %}
+                {% for cat in cats %}
+                {% set items = c.mitig_sections_html.get(cat, []) if c.mitig_sections_html else [] %}
+                {% if items and items|length %}
+                    {% set ns2.has_struct = true %}
+                    <details>
+                    <summary>{{ cat }}</summary>
+                    <div class="content">
+                        <ul>
+                        {% for it in items %}<li>{{ it|safe }}</li>{% endfor %}
+                        </ul>
+                    </div>
+                    </details>
+                {% endif %}
+                {% endfor %}
+                {% if not ns2.has_struct %}
+                <div class="mono">{{ c.mitigations_html|safe }}</div>
+                {% endif %}
+            </div>
+            </details>
+        </article>    
+        {% endfor %}
+    {% else %}
+        <div>Nenhum componente detectado acima do limiar.</div>
+    {% endif %}
 </div>
 
 <script>
