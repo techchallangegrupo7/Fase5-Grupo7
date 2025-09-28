@@ -1,158 +1,102 @@
-# Analisador STRIDE para Diagramas (YOLO + Gemini + Flask)
+# Analisador STRIDE para Diagramas (MVP)
 
-Este repositório contém um pipeline completo para **detectar componentes em diagramas de arquitetura** (AWS/Azure), **gerar análises STRIDE** com LLM e **exportar um relatório em PDF A4**, além de uma **interface web** (Flask) para envio de imagens e download do relatório.
+Este projeto é um MVP que automatiza a **modelagem de ameaças** a partir de **diagramas de arquitetura**. Ele integra três etapas principais:
 
-## Visão Geral dos Módulos
-
-- `criar_diagramas.py` — Gera **diagramas sintéticos** (AWS/Azure) com o pacote `diagrams` para testes e dataset. Saída em PNG/SVG/JPG.  
-- `1_gera_label.py` — Varre `dataset/images`, cria **labels YOLO** em `dataset/labels` (uma caixa por imagem, cobrindo 100%), e gera `dataset/classes.yaml` com o mapa de classes.  
-- `2_gera_variacoes.py` — (Augmentation) Gera **variações/augmentations** dos ícones/diagramas.  
-- `3_aux_validacao_qtd_classes_images.py` — Faz **contagem/validação** de classes a partir dos `.txt` de labels e exporta um relatório `.txt`.  
-- `4_stride_gemini.py` — Pipeline **CLI**: carrega YOLO, detecta componentes em imagens, **anota a imagem**, chama o LLM (Gemini) para **Análise STRIDE** e **Mitigações**, e **gera PDF**.  
-- `app.py` — **Aplicação Flask** com upload de diagrama/logo, detecção (YOLO), geração do PDF e **UI dark** com legenda dos componentes.  
-- `.env` — Variáveis de ambiente para pesos do YOLO, chave do Gemini, thresholds e branding.
-
-> Observação: para treinar um modelo YOLO, utilize sua rotina preferida. Este projeto consome os pesos prontos configurados em `YOLO_WEIGHTS`.
+1) **Preparação de dataset** (ícones + rótulos YOLO)
+2) **Geração de variações sintéticas** e divisão em _train/val/test_
+3) **Aplicação do detetor (YOLO) + LLM** para produzir um **Relatório STRIDE** em PDF a partir de um diagrama enviado pela interface web (Flask)
 
 ---
 
-## Requisitos
+## Estrutura do Projeto
 
-- **Python 3.10+** recomendado
-- **Graphviz (sistema)** instalado e no `PATH` (necessário para `diagrams`):
-  - Windows: instale o Graphviz pelo instalador oficial e reinicie o terminal
-  - Linux: `sudo apt-get install graphviz`
-  - macOS: `brew install graphviz`
-- (Opcional) **GPU CUDA**: instalar `torch` com CUDA adequado (veja: https://pytorch.org/get-started/locally/). O app usa CPU se CUDA não estiver disponível.
-
-Instale as dependências Python:
-
-```bash
-pip install -r requirements.txt
+```
+.
+├── 1_gera_label.py                     # Gera rótulos iniciais YOLO a partir dos ícones
+├── 2_gera_variacoes.py                 # Cria dataset sintético, variações e data.yaml
+├── 3_aux_validacao_qtd_classes_images.py # Relatório de contagem de classes/imagens
+├── 4_stride_gemini.py                  # Integra YOLO + LLM para gerar relatório STRIDE
+├── app.py                              # Interface web Flask para upload e análise
+├── .env                                # Variáveis de ambiente (chaves, configs)
+├── dataset/                            # Estrutura esperada para imagens/labels/yolo
+├── uploads/                            # Uploads de diagramas pelo usuário
+├── outputs/                            # PDFs finais gerados
+├── previews/                           # Pré-visualizações/anotações
+└── static/, fonts/                     # Recursos estáticos e fontes
 ```
 
 ---
 
-## Estrutura de Pastas (sugerida)
+## O que faz cada arquivo `.py`
 
-```
-project/
-├─ app.py
-├─ 1_gera_label.py
-├─ 2_gera_variacoes.py
-├─ 3_aux_validacao_qtd_classes_images.py
-├─ 4_stride_gemini.py
-├─ criar_diagramas.py
-├─ .env
-├─ dataset/
-│  ├─ images/                  # PNG/JPG dos ícones/diagramas
-│  ├─ labels/                  # TXT no formato YOLO
-│  ├─ best.pt                  # seus pesos YOLO (ou configure YOLO_WEIGHTS no .env)
-│  └─ classes.yaml             # gerado pelo 1_gera_label.py
-├─ uploads/                    # gerenciado pela app web
-├─ previews/                   # imagens anotadas (legenda)
-└─ outputs/                    # PDFs gerados
-```
+
+### `1_gera_label.py`
+
+Lê ícones base em `dataset/images/` e gera rótulos YOLO iniciais (arquivos `.txt`) baseados nos nomes.
+
+### `2_gera_variacoes.py`
+
+Com os rótulos gerados, compõe imagens sintéticas com variações de posição/tamanho/augmentations e exporta dataset estruturado para treinamento YOLO.
+
+### `3_aux_validacao_qtd_classes_images.py`
+
+Conta classes e imagens nos diretórios de labels e gera um relatório .txt de distribuição das classes.
+
+### `4_stride_gemini.py`
+
+Executa detecção com YOLO, monta contexto com componentes, consulta LLM (Gemini/OpenAI) e gera relatório STRIDE completo em PDF com ReportLab.
+
+### `app.py`
+
+Interface Flask que recebe upload de diagramas, executa detecção com YOLO, gera prompt para LLM (Gemini ou OpenAI) e produz relatório STRIDE em PDF.
 
 ---
 
-## Configuração (.env)
+## Arquivo `.env`
 
-Crie/edite o arquivo `.env` na raiz com, por exemplo:
+Exemplo de variáveis de ambiente:
 
-```ini
+```dotenv
+# Chaves de API
 GEMINI_API_KEY=SEU_TOKEN_AQUI
+OPENAI_API_KEY=SEU_TOKEN_AQUI
+
+# Modelos a utilizar
+GEMINI_MODEL=gemini-flash-latest
+OPENAI_MODEL=gpt-4.1-mini
+
+# Pesos YOLO
 YOLO_WEIGHTS=./dataset/best.pt
-APP_SECRET_KEY=um_segredo_qualquer
+
+# Configurações do Flask
+APP_SECRET_KEY=troque_isto_em_producao
+
+# Hiperparâmetros de inferência
 FAST_IMG_MAX_SIDE=1280
-YOLO_CONF=0.25
+YOLO_CONF=0.30
 YOLO_MAX_DET=50
 MAX_COMPONENTS=25
-NMS_IOU=0.5
+NMS_IOU=0.95
 ```
 
-- `GEMINI_API_KEY`: chave da API do Gemini (se não definida, a app usa **placeholders** para o texto do relatório).
-- `YOLO_WEIGHTS`: caminho para os pesos do YOLO (pode ser relativo ou absoluto).
-- `FAST_IMG_MAX_SIDE`: redimensiona imagens grandes para acelerar a inferência.
-- `YOLO_CONF`: limiar de confiança do YOLO.
-- `YOLO_MAX_DET`: máximo de detecções por imagem.
-- `MAX_COMPONENTS`: máximo de componentes listados no PDF/HTML (0 = sem limite).
-- `NMS_IOU`: limiar de IoU para supressão simples de sobreposição.
+- **GEMINI_API_KEY / OPENAI_API_KEY**: tokens de autenticação das LLMs.
+- **YOLO_WEIGHTS**: caminho dos pesos YOLO treinados.
+- **APP_SECRET_KEY**: chave secreta do Flask.
+- **FAST_IMG_MAX_SIDE, YOLO_CONF, YOLO_MAX_DET, MAX_COMPONENTS, NMS_IOU**: parâmetros de controle da detecção e geração do relatório.
 
 ---
 
-## Como Usar
+## Como rodar
 
-### 1) Gerar diagramas sintéticos (opcional)
-Gera um conjunto de imagens com serviços AWS/Azure aleatórios, para testes/treino:
+1. Instale dependências:
 
-```bash
-python criar_diagramas.py --n 100 --out diagramas --fmt png
-```
+   ```bash
+   pip install flask pillow reportlab ultralytics google-generativeai openai pyyaml scikit-learn
+   ```
+2. Crie `.env` com suas chaves e configs.
+3. Execute:
 
-Isso cria `diagramas/diagram_0001.png`, etc.
-
-### 2) Criar labels YOLO a partir dos arquivos de `dataset/images`
-Se você possui um conjunto de ícones/diagramas em `dataset/images`, gere os rótulos:
-
-```bash
-python 1_gera_label.py
-```
-
-- Cria/atualiza `dataset/labels/*.txt` e `dataset/classes.yaml`.
-- **Regra de classe**: o nome do arquivo (sem sufixo `_dark`/`_light`) define o nome da classe.
-
-### 3) (Opcional) Gerar variações
-Para aumentar a diversidade dos dados (augmentations), rode:
-
-```bash
-python 2_gera_variacoes.py
-```
-
-Ajuste os parâmetros dentro do script conforme sua necessidade.
-
-### 4) Validar/Contar classes nos `.txt`
-Verifica os IDs presentes nos rótulos (útil para sanity check/estratificação):
-
-```bash
-python 3_aux_validacao_qtd_classes_images.py
-```
-
-Cria um `relatorio.txt` com a contagem por diretório/pasta de labels.
-
-### 5) Rodar a análise STRIDE por linha de comando
-Analisa uma lista de imagens, gera a imagem **anotada** e um **PDF** por execução:
-
-```bash
-python 4_stride_gemini.py
-```
-
-- Requer `YOLO_WEIGHTS` no `.env` (ou ajuste no script).
-- Se `GEMINI_API_KEY` **não** estiver definido, o texto STRIDE/Mitigações usa **placeholders**.
-
-### 6) Subir a aplicação Web (Flask)
-Interface web para enviar um diagrama, visualizar **legenda** e **baixar o PDF**:
-
-```bash
-python app.py
-```
-
-Depois, acesse: `http://127.0.0.1:5000/`  
-Faça upload do **diagrama** (e opcionalmente de um **logo**), ajuste `Título/Subtítulo/Cores`, e clique em **Analisar e gerar PDF**.
-
----
-
-## Notas de Execução & Dicas
-
-- **Fonts**: a aplicação tenta usar `arial.ttf`; se não disponível, cai no `ImageFont.load_default()`.
-- **LLM**: para produção, configure o Gemini no `.env`. Em testes, o **modo rápido** (sem LLM) está disponível na UI.
-- **GPU**: se o PyTorch detectar CUDA, a inferência YOLO pode usar half-precision para ganhar velocidade.
-- **Graphviz/Diagrams**: necessário para gerar diagramas; em servidores Linux, instale o pacote do sistema e garanta que `dot` está no PATH.
-- **Treinamento YOLO**: este projeto espera os pesos já treinados (ex.: `weights/best.pt`). Use sua pipeline de treino favorita.
-
----
-
-## Licença
-
-Uso acadêmico/educacional (Hackathon/estudos).
-
+   ```bash
+   python app.py
+   ```
+4. Acesse `http://localhost:5000`, faça upload de um diagrama e baixe o PDF gerado em `outputs/`.
