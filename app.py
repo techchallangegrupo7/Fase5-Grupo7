@@ -48,6 +48,7 @@ except Exception:
 MAX_CONTENT_LENGTH_MB = int(os.getenv("MAX_CONTENT_LENGTH_MB", "15"))
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg"}
 
+STATIC_FOLDER = os.path.abspath("static")
 UPLOAD_FOLDER = os.path.abspath("uploads")
 PREVIEW_FOLDER = os.path.abspath("previews")
 OUTPUT_FOLDER = os.path.abspath("outputs")
@@ -60,10 +61,13 @@ YOLO_MAX_DET = int(os.getenv("YOLO_MAX_DET", "50"))               # máx. detec�
 MAX_COMPONENTS = int(os.getenv("MAX_COMPONENTS", "25"))           # máx. componentes no PDF/UI
 QUICK_DEFAULT = os.getenv("QUICK_DEFAULT", "0") == "1"            # modo rápido default (sem LLM)
 
+DISABLE_LLM = os.getenv("DISABLE_LLM", "0") == "1"
 # Gemini / LLM
-DISABLE_GEMINI = os.getenv("DISABLE_GEMINI", "0") == "1"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+# OpenAI / LLM
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-nano")
 
 # YOLO
 YOLO_WEIGHTS = os.getenv("YOLO_WEIGHTS", os.path.join("weights", "best.pt"))
@@ -96,19 +100,34 @@ _YOLO_MODEL = None
 
 # ---------- Gemini ----------
 _gemini = None
-if not DISABLE_GEMINI:
+if not DISABLE_LLM:
     try:
         import google.generativeai as genai
         if not GEMINI_API_KEY:
-            print("[AVISO] GEMINI_API_KEY não definido. Defina ou use DISABLE_GEMINI=1 para pular LLM.")
-            DISABLE_GEMINI = True
+            print("[AVISO] GEMINI_API_KEY não definido. Defina ou use DISABLE_LLM=1 para pular LLM.")
+            DISABLE_LLM = True
         else:
             genai.configure(api_key=GEMINI_API_KEY)
             _gemini = genai.GenerativeModel(GEMINI_MODEL)
     except Exception as e:
         print(f"[AVISO] Falha ao iniciar Gemini: {e}. Usando placeholders.")
-        DISABLE_GEMINI = True
+        DISABLE_LLM = True
         _gemini = None
+
+# ---------- OpenAI ----------
+_openai = None
+if not DISABLE_LLM:
+    try:
+        from langchain_openai import ChatOpenAI
+        if not OPENAI_API_KEY:
+            print("[AVISO] OPENAI_API_KEY não definido. Defina ou use DISABLE_LLM=1 para pular LLM.")
+            DISABLE_LLM = True
+        else:
+            _openai = ChatOpenAI(model=OPENAI_MODEL, api_key=OPENAI_API_KEY)
+    except Exception as e:
+        print(f"[AVISO] Falha ao iniciar OpenAI: {e}. Usando placeholders.")
+        DISABLE_LLM = True
+        _openai = None
 
 # ---------- YOLO ----------
 def get_yolo():
@@ -263,7 +282,7 @@ def annotate_image(original_path: str, detections: List, color_hex: str = "#0EA5
     return out_path, legend_lines
 
 # Cache simples para evitar chamar o LLM repetidas vezes para o mesmo componente
-GEMINI_CACHE: Dict[str, Tuple[str, str]] = {}
+LLM_CACHE: Dict[str, Tuple[str, str]] = {}
 
 # --- Parser de texto -> seções STRIDE (bullets por categoria) ---
 import re
@@ -389,12 +408,14 @@ def sections_to_html(secs: dict[str, list[str]]) -> dict[str, list[str]]:
     return {k: [_sanitize_para(v) for v in (secs.get(k) or [])] for k in _STRIDE_CANON}
 
 # ---------- Gemini ----------
-def call_gemini_stride(component_name: str) -> Tuple[str, str]:
+def call_gemini_stride(llm: str, component_name: str) -> Tuple[str, str]:
     """Retorna (análise, mitigações) via Gemini. Usa cache e placeholders."""
-    if component_name in GEMINI_CACHE:
-        return GEMINI_CACHE[component_name]
 
-    if DISABLE_GEMINI or _gemini is None:
+    key = f"{llm}_{component_name}"
+    if key in LLM_CACHE:
+        return LLM_CACHE[key]
+    
+    if DISABLE_LLM or _gemini is None:
         analysis = (
             "Spoofing: riscos de identidade falsa.\n"
             "Tampering: alterações não autorizadas.\n"
@@ -411,7 +432,6 @@ def call_gemini_stride(component_name: str) -> Tuple[str, str]:
             "DoS: rate limiting e autoscaling.\n"
             "EoP: princípio do menor privilégio."
         )
-        GEMINI_CACHE[component_name] = (analysis, mitig)
         return analysis, mitig
 
     prompt_a = f"""
@@ -421,6 +441,7 @@ def call_gemini_stride(component_name: str) -> Tuple[str, str]:
     """
     try:
         resp_a = _gemini.generate_content(prompt_a)
+        #print(f"resp_a: {resp_a.text}")
         analysis = resp_a.text
     except Exception as e:
         analysis = f"[Erro ao obter análise do Gemini: {e}]"
@@ -432,11 +453,65 @@ def call_gemini_stride(component_name: str) -> Tuple[str, str]:
     """
     try:
         resp_m = _gemini.generate_content(prompt_m)
+        #print(f"resp_m: {resp_m.text}")
         mitig = resp_m.text
     except Exception as e:
         mitig = f"[Erro ao obter mitigações do Gemini: {e}]"
 
-    GEMINI_CACHE[component_name] = (analysis, mitig)
+    LLM_CACHE[key] = (analysis, mitig)
+    return analysis, mitig
+
+# ---------- OpenAI ----------
+def call_openai_stride(llm: str, component_name: str) -> Tuple[str, str]:
+    """Retorna (análise, mitigações) via OpenAI. Usa cache e placeholders."""
+    key = f"{llm}_{component_name}"
+    if key in LLM_CACHE:
+        return LLM_CACHE[key]
+
+    if DISABLE_LLM or _openai is None:
+        analysis = (
+            "Spoofing: riscos de identidade falsa.\n"
+            "Tampering: alterações não autorizadas.\n"
+            "Repudiation: falta de trilhas de auditoria.\n"
+            "Information Disclosure: exposição indevida.\n"
+            "Denial of Service: indisponibilidade do serviço.\n"
+            "Elevation of Privilege: abuso de permissões."
+        )
+        mitig = (
+            "Spoofing: MFA e identidade federada.\n"
+            "Tampering: assinaturas, WORM e versionamento.\n"
+            "Repudiation: logs imutáveis e trilhas.\n"
+            "Info Disclosure: criptografia e DLP.\n"
+            "DoS: rate limiting e autoscaling.\n"
+            "EoP: princípio do menor privilégio."
+        )
+        return analysis, mitig
+
+    prompt_a = f"""
+    Analise o componente de arquitetura "{component_name}" usando STRIDE.
+    Gere somente bullets por categoria (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege).
+    Não inclua títulos como 'Análise' ou 'Mitigações'; apenas as listas.
+    """
+    try:
+        resp_a = _openai.invoke(prompt_a)
+        #print(f"resp_a: {resp_a.content}")
+        analysis = resp_a.content
+    except Exception as e:
+        analysis = f"[Erro ao obter análise do Gemini: {e}]"
+
+    prompt_m = f"""
+    Com base nas ameaças a seguir, liste mitigações objetivas (uma por bullet) por categoria STRIDE.
+    Não inclua cabeçalhos adicionais: apenas as listas por categoria.
+    Ameaças:\n{analysis}
+    """
+    try:
+        resp_m = _openai.invoke(prompt_m)
+        #print(f"resp_m: {resp_m.content}")
+        mitig = resp_m.content
+    except Exception as e:
+        mitig = f"[Erro ao obter mitigações do Gemini: {e}]"
+
+    LLM_CACHE[key] = (analysis, mitig)
     return analysis, mitig
 
 # ---------- PDF ----------
@@ -449,6 +524,7 @@ def build_pdf_a4(
     source_image_path: str,
     labeled_image_path: str,
     legend: str,
+    llm: str,
     per_component: List[Tuple[str, str, str]],
 ):
     """Gera PDF A4 com paginação automática e listas/bold."""
@@ -485,7 +561,7 @@ def build_pdf_a4(
         canvas.setFont("Helvetica-Bold", 18)
         canvas.drawString(100, H - 42, title or "Relatório de Ameaças STRIDE")
         canvas.setFont("Helvetica", 11)
-        canvas.drawString(100, H - 58, subtitle or "Análise automatizada por YOLO + Gemini")
+        canvas.drawString(100, H - 58, subtitle or f"Análise automatizada por YOLO + {llm}" )
         canvas.setFillColor("black")
         canvas.setFont("Helvetica", 9)
         canvas.drawString(24, H - 86, f"Gerado em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -589,7 +665,7 @@ BASE_HTML = r"""
     .preview-img{ max-width:100%; border-radius:12px; border:1px solid #1F2937; }
     footer{ text-align:center; padding:24px; color:#94A3B8; font-size:12px; }
     .brand-bar{ display:flex; align-items:center; gap:12px; }
-    .brand-logo{ width:36px; height:36px; object-fit:contain; background:#0B1220; border-radius:8px; padding:4px; border:1px solid #1F2937; }
+    .brand-logo{ width:100px; height:36px; object-fit:contain; background:#0B1220; border-radius:8px; padding:4px; border:1px solid #1F2937; }
     .flash{ background:#1F2937; color:#F59E0B; padding:10px 12px; border:1px solid #374151; border-radius:8px; margin-bottom:12px; }
     .legend{ font-size: 14px; background:#0B1220; border:1px solid #1F2937; border-radius:10px; padding:10px; }
     .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace; white-space:pre-wrap; }
@@ -599,6 +675,9 @@ BASE_HTML = r"""
     ul{ margin:8px 0 12px 22px; }
     li{ margin:6px 0; }
     b{ color:#F3F4F6; }
+    .model-selector { display: flex; gap: 10px; align-items: center; }
+    .model-selector label { display: flex; align-items: center; gap: 8px; margin-right: 50px; }
+    .model-selector img { width: 20px; height: 20px; }
   </style>
 </head>
 <body>
@@ -650,7 +729,7 @@ INDEX_HTML = r"""
       </div>
       <div>
         <label class="label">Subtítulo</label>
-        <input type="text" name="subtitle" placeholder="Análise automatizada por YOLO + Gemini">
+        <input type="text" id="subtitle" name="subtitle" placeholder="Análise automatizada por YOLO + Gemini">
       </div>
     </div>
 
@@ -666,16 +745,46 @@ INDEX_HTML = r"""
     </div>
 
     <div style="margin-top:12px;">
+        <div class="model-selector">
+            <label class="label">LLM Model
+                <input type="radio" id="gemini" name="llm_model" value="Gemini" checked style="margin-left: 20px;">
+                <label for="gemini"  style="">
+                    <img src="./static/gemini.png" alt="Gemini Icon">Gemini
+                </label>
+                <input type="radio" id="openai" name="llm_model" value="OpenAI">
+                <label for="openai">
+                    <img src="./static/openai.ico" alt="OpenAI Icon">OpenAI
+                </label>
+            </label>
+        </div>
+    </div>
+
+    <div style="margin-top:12px;">
       <label class="label"><input type="checkbox" name="quick" value="1" {% if quick_default %}checked{% endif %}> Modo rápido (pula LLM / usa placeholders)</label>
       <div class="tip">Excelente para testes rápidos; desmarque quando quiser texto completo do LLM.</div>
     </div>
 
     <div style="margin-top:16px; display:flex; gap:12px; align-items:center;">
       <button class="btn" type="submit">Analisar e gerar PDF</button>
-      {% if disable_gemini %}<div class="tip">LLM desabilitado — placeholders ativos. Defina GEMINI_API_KEY para ativar.</div>{% endif %}
+      {% if disable_llm %}<div class="tip">LLM desabilitado — placeholders ativos. Defina GEMINI_API_KEY/OPENAI_API_KEY para ativar.</div>{% endif %}
     </div>
   </form>
 </div>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const textInput = document.getElementById('subtitle');
+        const radioButtons = document.querySelectorAll('input[name="llm_model"]');
+        function updatePlaceholder() {
+            const selectedRadio = document.querySelector('input[name="llm_model"]:checked');
+            const selectedModel = selectedRadio.value;
+            const newPlaceholder = `Análise automatizada por YOLO + ${selectedModel}`;
+            textInput.placeholder = newPlaceholder;
+        }
+        radioButtons.forEach(function(radio) {
+            radio.addEventListener('change', updatePlaceholder);
+        });
+    });
+</script>
 {% endblock %}
 """
 
@@ -804,9 +913,9 @@ def index():
         secondary_color="#22D3EE", # ciano
         header_title="Analisador STRIDE para Diagramas - Grupo 7 - 4IADT",
         header_subtitle="Detecta componentes (YOLO), gera análise e exporte PDF A4",
-        brand_logo=None,
+        brand_logo="./static/postech.png",
         max_mb=MAX_CONTENT_LENGTH_MB,
-        disable_gemini=DISABLE_GEMINI,
+        disable_llm=DISABLE_LLM,
         quick_default=QUICK_DEFAULT,
         year=datetime.now().year,
     )
@@ -825,8 +934,9 @@ def analyze():
             flash("Formato não permitido. Use PNG ou JPG.")
             return redirect(url_for("index"))
 
+        llm = request.form.get("llm_model")
         title = request.form.get("title", "").strip() or "Relatório de Ameaças STRIDE"
-        subtitle = request.form.get("subtitle", "").strip() or "Análise automatizada por YOLO + Gemini"
+        subtitle = request.form.get("subtitle", "").strip() or f"Análise automatizada por YOLO + {llm}"
         primary = request.form.get("primary", "#7C3AED")
         secondary = request.form.get("secondary", "#22D3EE")
         quick = request.form.get("quick", "1" if QUICK_DEFAULT else "0") == "1"
@@ -845,6 +955,11 @@ def analyze():
                 logo_filename = secure_filename(logo.filename)
                 logo_path = os.path.join(UPLOAD_FOLDER, f"logo_{int(time.time())}_{logo_filename}")
                 logo.save(logo_path)
+        else:
+            logo_filename = "postech.png"
+            logo = Image.open(os.path.join(STATIC_FOLDER, logo_filename))
+            logo_path = os.path.join(UPLOAD_FOLDER, f"logo_{int(time.time())}_{logo_filename}")
+            logo.save(logo_path)
 
         # YOLO
         model = get_yolo()
@@ -875,15 +990,21 @@ def analyze():
             if comp in vistos:
                 continue
             vistos.add(comp)
-
+            #print(f"LLM_CACHE: {LLM_CACHE}")
             if quick:
-                global DISABLE_GEMINI
-                prev = DISABLE_GEMINI
-                DISABLE_GEMINI = True
-                analysis, mitig = call_gemini_stride(comp)
-                DISABLE_GEMINI = prev
+                global DISABLE_LLM
+                prev = DISABLE_LLM
+                DISABLE_LLM = True
+                #print(f"quick stride: {comp}")
+                analysis, mitig = call_gemini_stride("", comp)
+                DISABLE_LLM = prev
             else:
-                analysis, mitig = call_gemini_stride(comp)
+                if(llm=="Gemini"):
+                    #print(f"gemini stride: {comp}")
+                    analysis, mitig = call_gemini_stride(llm, comp)
+                elif(llm=="OpenAI"):
+                    #print(f"openai stride: {comp}")
+                    analysis, mitig = call_openai_stride(llm, comp)
 
             # Estrutura + HTML seguro para web
             a_secs = parse_stride_sections(analysis)
@@ -918,6 +1039,7 @@ def analyze():
             source_image_path=src_path,
             labeled_image_path=labeled_path,
             legend=legend_lines,
+            llm=llm,
             per_component=[(c["name"], c["analysis"], c["mitigations"]) for c in components],
         )
 
