@@ -50,8 +50,7 @@ Ele une **Visão Computacional (YOLO)** + **LLMs (Gemini/OpenAI)** + **Flask** +
 ├── uploads/                              # Uploads do usuário
 ├── outputs/                              # Relatórios PDF gerados
 ├── previews/                             # Pré-visualizações anotadas
-├── static/                               # Arquivos estáticos do Flask
-└── fonts/                                # Fontes usadas pelo ReportLab/PIL
+└── static/                               # Arquivos estáticos do Flask
 ```
 
 ---
