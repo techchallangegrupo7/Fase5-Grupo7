@@ -180,6 +180,25 @@ NMS_IOU=0.95
 
 ---
 
+## 🎥 Demonstração em Vídeo
+
+Assista ao vídeo explicativo do projeto:
+[🔗 YouTube – Grupo 7 Hackathon](https://youtu.be/oU8IIAeUlLA)
+
+---
+
+## 👥 Equipe
+
+Grupo 7 da turma IA para Devs - FIAP:
+
+* **Fábio Yuiti Takaki** (Discord: `takakisan.`)
+* **Luiz Claudio Cunha de Albuquerque** (Discord: `inefavel1305`)
+* **Matheus Filipe Condé Rocha** (Discord: `mfconde`)
+* **Pedro Vitor Franco de Carvalho** (Discord: `pedro_black10`)
+* **Tatiana Yuka Takaki** (Discord: `tatianayk`)
+
+---
+
 ## 📄 Licença / Créditos
 
 Projeto acadêmico para Hackathon FIAP – Fase 5: **Modelagem de Ameaças com IA (STRIDE)**.
