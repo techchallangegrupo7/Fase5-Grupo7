@@ -11,7 +11,7 @@ import yaml
 # --- 1. DEFINIÇÃO DE CAMINHOS E PARÂMETROS ---
 ICONS_DIR = 'dataset/images'
 ICONS_LABELS_DIR = 'dataset/labels'
-OUTPUT_DATASET_DIR = 'dataset/yolo'
+OUTPUT_DATASET_DIR = 'dataset/yolo_sem_rotacao'
 
 # Parâmetros de geração de imagens sintéticas
 # Cada classe terá este número de instâncias no conjunto TOTAL gerado
