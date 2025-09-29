@@ -371,12 +371,6 @@ def annotate_image(original_path: str, detections: List, color_hex: str = "#0EA5
     img.save(out_path, optimize=True)
     return out_path, legend_lines
 
-# ============================================================
-# Cache para evitar chamadas repetidas ao LLM por componente
-# chave: "{LLM}_{component_name}" → valor: (analysis, mitigations)
-# ============================================================
-
-LLM_CACHE: Dict[str, Tuple[str, str]] = {}
 
 # ============================================================
 # Parsing de texto → seções STRIDE (organiza bullets por categoria)
@@ -652,6 +646,14 @@ def ensure_ptbr(text: str) -> str:
         "", out, flags=re.IGNORECASE | re.MULTILINE
     )
     return out
+
+# ============================================================
+# Cache para evitar chamadas repetidas ao LLM por componente
+# chave: "{LLM}_{component_name}" → valor: (analysis, mitigations)
+# ============================================================
+
+LLM_CACHE: Dict[str, Tuple[str, str]] = {}
+
 
 # ============================================================
 # Chamadas de LLM (Gemini / OpenAI) com cache
