@@ -27,7 +27,7 @@ Ele une **Visão Computacional (YOLO)** + **LLMs (Gemini/OpenAI)** + **Flask** +
 
 1. Preparar dataset de ícones (com scripts `1_gera_label.py` e `2_gera_variacoes.py`).
 2. Validar consistência do dataset (`3_aux_validacao_qtd_classes_images.py`).
-3. Treinar YOLO com os dados gerados.
+3. Treinar YOLO com os dados gerados (`FASE5.ipynb`).
 4. Subir o Flask (`app.py`).
 5. Fazer upload de um diagrama → sistema aplica YOLO → gera relatório STRIDE → retorna PDF.
 
@@ -42,12 +42,12 @@ Ele une **Visão Computacional (YOLO)** + **LLMs (Gemini/OpenAI)** + **Flask** +
 ├── 3_aux_validacao_qtd_classes_images.py # Relatório de distribuição de classes
 ├── 4_stride_gemini.py                    # Integra YOLO + LLM → gera PDF STRIDE
 ├── app.py                                # Interface Flask (upload, análise, relatório)
-├── FASE5.ipynb                           # Notebook principal do projeto
+├── FASE5.ipynb                           # Notebook do treinamento YOLO
 ├── .env                                  # Variáveis de ambiente
 ├── dataset/                              # Dataset de treino/teste YOLO
 │   ├── images/                           # Ícones base
 │   ├── labels/                           # Labels YOLO
-│   └── yolo/                             # train/val/test + data.yaml
+│   └── yolo_sem_rotacao/                 # train/val/test + data.yaml
 ├── uploads/                              # Uploads do usuário
 ├── outputs/                              # Relatórios PDF gerados
 ├── previews/                             # Pré-visualizações anotadas
@@ -97,9 +97,8 @@ Ele une **Visão Computacional (YOLO)** + **LLMs (Gemini/OpenAI)** + **Flask** +
 
 ### `FASE5.ipynb`
 
-- Notebook principal do projeto.
-- Contém a integração dos módulos, experimentos, testes e execução completa da solução.
-- Serve como documentação técnica e pipeline consolidado.
+- Notebook do treinamento utilizando YOLOv8s.
+- Gera log do treinamento e salva em arquivo `.txt`.
 
 ---
 
@@ -112,7 +111,7 @@ Exemplo:
 GEMINI_API_KEY=SEU_TOKEN_AQUI
 GEMINI_MODEL=gemini-flash-latest
 OPENAI_API_KEY=SEU_TOKEN_AQUI
-OPENAI_MODEL=gpt-4.1-mini
+OPENAI_MODEL=gpt-5-nano
 
 # YOLO
 YOLO_WEIGHTS=./dataset/treinamento_yolo_aws_best.pt
@@ -145,7 +144,7 @@ NMS_IOU=0.95
 1. **Instalar dependências**
 
    ```bash
-   pip install flask pillow reportlab ultralytics google-generativeai openai scikit-learn pyyaml
+   pip install -r requirements.txt
    ```
 2. **Criar `.env`**
 
